@@ -413,6 +413,11 @@ create policy feed_obj_del on storage.objects for delete
 -- ---------------------------------------------------------------------
 -- DADOS INICIAIS
 -- ---------------------------------------------------------------------
+-- Contas criadas antes deste código rodar também ganham perfil
+insert into public.perfis(id, nome, email)
+select id, coalesce(raw_user_meta_data->>'nome',''), lower(email) from auth.users
+on conflict (id) do nothing;
+
 insert into public.config(modalidade, preco, dia_vencimento, contrato_texto) values
 ('judo', 120, 10, $c$MODELO DE CONTRATO — revise o texto antes de usar.
 
