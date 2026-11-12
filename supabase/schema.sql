@@ -132,6 +132,27 @@ create table if not exists public.mensalidades (
   unique (aluno_id, competencia)
 );
 
+create table if not exists public.pagamentos_online (
+  id                  bigserial primary key,
+  order_nsu           text unique not null,
+  mensalidade_id      bigint references public.mensalidades(id) on delete cascade,
+  aluno_id            uuid references public.alunos(id) on delete cascade,
+  modalidade          text not null,
+  url                 text,
+  valor_centavos      int,
+  status              text not null default 'aberto',
+  capture_method      text,
+  valor_pago_centavos int,
+  parcelas            int,
+  transaction_nsu     text,
+  slug                text,
+  receipt_url         text,
+  criado_por          uuid,
+  criado_em           timestamptz not null default now(),
+  pago_em             timestamptz
+);
+alter table public.config add column if not exists infinitepay_handle text;
+
 -- ---------------------------------------------------------------------
 -- FUNÇÕES DE PERMISSÃO
 -- ---------------------------------------------------------------------
@@ -336,6 +357,7 @@ alter table public.competicoes    enable row level security;
 alter table public.avisos         enable row level security;
 alter table public.feed           enable row level security;
 alter table public.mensalidades   enable row level security;
+alter table public.pagamentos_online enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public' loop
@@ -389,6 +411,9 @@ create policy men_sel on public.mensalidades for select using (public.is_resp(mo
 create policy men_ins on public.mensalidades for insert with check (public.is_resp(modalidade));
 create policy men_upd on public.mensalidades for update using (public.is_resp(modalidade)) with check (public.is_resp(modalidade));
 create policy men_del on public.mensalidades for delete using (public.is_resp(modalidade));
+
+-- Pagamentos online: responsável e o próprio aluno veem; só o servidor registra
+create policy po_sel on public.pagamentos_online for select using (public.is_resp(modalidade) or public.owns_aluno(aluno_id));
 
 grant execute on function public.contrato_publico(text) to anon, authenticated;
 grant execute on function public.solicitar_matricula(text,text,date,text,text,text,text) to authenticated;

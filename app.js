@@ -92,13 +92,17 @@ async function q(p){const r=await p;if(r&&r.error){const e=new Error(traduz(r.er
 async function act(fn){busy(true);try{await fn()}catch(e){console.error(e);toast(e.message||'Erro',true)}finally{busy(false)}}
 const uid=()=>S.sess&&S.sess.user.id;
 
+/* ---------- retorno da tela de pagamento ---------- */
+const RET=(()=>{try{const u=new URL(location.href);if(u.searchParams.get('pagamento')==='retorno'){const g=k=>u.searchParams.get(k);
+  const o={order_nsu:g('order_nsu'),transaction_nsu:g('transaction_nsu'),slug:g('slug'),receipt_url:g('receipt_url'),capture_method:g('capture_method')};history.replaceState(null,'',u.pathname);return o}}catch(e){}return null})();
+
 /* ---------- estado ---------- */
 let S={mod:LS.get('mod'),scr:'boot',sess:null,ctx:null,role:null,aluno:null,pname:'',tab:null,sub:null,rk:'comp',mat:null,D:{},ch:null,chData:null,newImg:null,newBlob:null,legDraft:'',cad:{}};
 function go(o){if(o.tab&&o.tab!==S.tab)S.ch=null;Object.assign(S,o);render()}
 function render(keep){
   if(S.mod&&S.scr!=='escolha')document.body.dataset.mod=S.mod;else document.body.removeAttribute('data-mod');
   const v={boot:vSpin,carregando:vSpin,semconfig:vSemConfig,erro:vErro,escolha:vEscolha,entrada:vEntrada,login:vLogin,cadastro:vCadastro,confirmeEmail:vConfirmeEmail,
-    novasenha:vNovaSenha,semvinculo:vSemVinculo,aguardando:vAguardando,mat:vMat,app:vApp}[S.scr]||vErro;
+    novasenha:vNovaSenha,retorno:vRetorno,semvinculo:vSemVinculo,aguardando:vAguardando,mat:vMat,app:vApp}[S.scr]||vErro;
   $('#app').innerHTML=v();
   if(!keep)window.scrollTo(0,0);
 }
@@ -110,6 +114,9 @@ async function boot(){
   sb.auth.onAuthStateChange((ev,session)=>{S.sess=session;if(ev==='PASSWORD_RECOVERY'){S.scr='novasenha';render()}});
   try{const {data}=await sb.auth.getSession();S.sess=data.session}catch(e){S.sess=null}
   if(S.scr==='novasenha')return;
+  if(RET&&RET.order_nsu){S.scr='retorno';S.ret={status:'conferindo'};render();
+    try{const {data}=await sb.functions.invoke('pagamento',{body:{acao:'confirmar',...RET}});S.ret={status:data&&data.ok?'ok':'aguardando',metodo:data&&data.metodo}}catch(e){S.ret={status:'aguardando'}}
+    render();return}
   if(S.sess)await entrarNoApp();else{S.scr=S.mod?'entrada':'escolha';render()}
 }
 async function entrarNoApp(){S.scr='carregando';render();
@@ -193,6 +200,14 @@ const autor=()=>(S.role==='resp'?'Prof. ':'')+S.pname;
 
 /* ---------- telas de entrada ---------- */
 function vSpin(){return `<div class="center"><div class="spin"></div></div>`}
+function vRetorno(){const r=S.ret||{};
+  if(r.status==='conferindo')return `<div class="center"><div class="spin"></div><p class="mut mt16">Conferindo seu pagamento...</p></div>`;
+  const ok=r.status==='ok';
+  return `<div class="center"><div class="okbig" style="${ok?'':'background:linear-gradient(135deg,#d99a00,#f5b400);box-shadow:0 0 50px rgba(245,180,0,.4)'}">${ic(ok?'check':'refresh')}</div>
+  <div class="h1">${ok?'Pagamento confirmado!':'Pagamento recebido'}</div>
+  <p class="mut mt12">${ok?`Sua mensalidade já aparece como paga${r.metodo?' ('+esc(r.metodo)+')':''}. Obrigado!`:'A InfinitePay ainda está confirmando. Em instantes a mensalidade aparece como paga no app.'}</p>
+  <button class="btn mt16" style="max-width:280px" onclick="continuarRetorno()">Continuar</button></div>`}
+function continuarRetorno(){S.ret=null;if(S.sess)act(entrarNoApp);else go({scr:S.mod?'entrada':'escolha'})}
 function vSemConfig(){return `<div class="center"><div class="h1">Quase lá</div><p class="mut mt12">O app ainda não foi conectado ao banco de dados. Preencha o arquivo config.js.</p></div>`}
 function vErro(){return `<div class="center"><div class="h1">Ops</div><p class="mut mt12">${esc(S.erro||'Não foi possível carregar.')}</p><button class="btn mt16" style="max-width:260px" onclick="entrarNoApp()">${ic('refresh')}Tentar de novo</button><button class="link mt12" onclick="sair()">Sair da conta</button></div>`}
 function vEscolha(){return `<div class="welcome fade">
@@ -321,6 +336,7 @@ function aInicio(){const D=S.D,a=S.aluno,mi=D.mi;const rc=ordComp(rankRows(D.ran
   const mrow=(D.mens||[]).find(x=>x.competencia===mi);const st=statusMens(mrow,D.cfg);
   return `<div class="hello"><small>Bem-vindo de volta</small><h1 class="h1">Olá, ${esc(first(a.nome))}</h1></div>
   ${!contratoOk(a,D.cfg)?`<button class="warnbox" onclick="go({tab:'perfil',sub:'contrato'})">${ic('alert')}<span><b>Contrato aguardando seu aceite.</b><br>Toque para ler e aceitar.</span></button>`:''}
+  ${st!=='pago'&&online()?`<button class="warnbox" onclick="go({tab:'mensal'})">${ic('money')}<span><b>Mensalidade de ${nomeMes(mi).toLowerCase()} ${st==='atrasado'?'atrasada':'em aberto'}.</b><br>Toque para pagar por Pix ou cartão.</span></button>`:''}
   ${feedCard(D.feed)}
   <div class="sec-t">Avisos ${D.avisos.length?`<span class="cnt">${D.avisos.length}</span>`:''}</div>
   <div>${D.avisos.length?D.avisos.slice(0,5).map(v=>`<div class="aviso">${ic('bell')}<div><p>${esc(v.texto)}</p><small>${esc(v.autor_nome||'')} • ${quando(v.criado_em)}</small></div></div>`).join(''):'<div class="empty">Nenhum aviso no momento.</div>'}</div>
@@ -354,8 +370,15 @@ function aMensal(){const D=S.D,a=S.aluno,cfg=D.cfg||{preco:0,dia_vencimento:10};
   return `<div class="hello"><small>${MODS[S.mod].nome}</small><h1 class="h1">Mensalidade</h1></div>
   <div class="paycard ${st}"><span class="st" style="color:${st==='pago'?'#4ee28a':st==='pendente'?'#ffcc3d':'#ff7a7a'}">${label}</span><div class="big">${money(row?row.valor:cfg.preco)}</div><small class="mut">${nomeMes(mi)}/${mi.slice(0,4)} • vencimento ${pad(cfg.dia_vencimento)}/${mi.slice(5,7)}</small>
   ${st==='pago'?`<p class="mt12" style="font-size:14px">Pago${row.metodo?' via <b>'+row.metodo+'</b>':''}${row.pago_em?' em '+br(row.pago_em.slice(0,10)):''}.</p>`:''}</div>
-  ${st!=='pago'?`<div class="info">${ic('info')}<span>Pague diretamente ao professor responsável (Pix ou em espécie). Ele registra o pagamento aqui no app.<br><b>Em breve:</b> pagamento por Pix e cartão direto pelo app.</span></div>`:''}
-  ${hist.length?`<div class="sec-t">Histórico</div>${hist.map(h=>`<div class="li"><div class="grow">${nomeMes(h.competencia)}/${h.competencia.slice(0,4)}<small>${h.status==='pago'?'Pago'+(h.metodo?' via '+h.metodo:'')+(h.pago_em?' em '+br(h.pago_em.slice(0,10)):''):money(h.valor)}</small></div>${payBadge(statusMens(h,cfg))}</div>`).join('')}`:''}`}
+  ${st!=='pago'&&online()?`<button class="btn mt12" onclick="pagarOnline(${row?row.id:'null'})">${ic('money')}Pagar agora — Pix ou cartão</button><p class="mut tiny mt8" style="text-align:center">Pagamento seguro pela InfinitePay. Pix sem taxa; cartão em até 12x.</p>`:''}
+  ${st!=='pago'&&!online()?`<div class="info">${ic('info')}<span>Pague diretamente ao professor responsável (Pix ou em espécie). Ele registra o pagamento aqui no app.</span></div>`:''}
+  ${st!=='pago'&&online()?`<div class="info">${ic('info')}<span>Também é possível pagar em espécie ao professor responsável, que registra no app.</span></div>`:''}
+  ${hist.length?`<div class="sec-t">Histórico</div>${hist.map(h=>`<div class="li"><div class="grow">${nomeMes(h.competencia)}/${h.competencia.slice(0,4)}<small>${h.status==='pago'?'Pago'+(h.metodo?' via '+h.metodo:'')+(h.pago_em?' em '+br(h.pago_em.slice(0,10)):''):money(h.valor)}</small></div>${h.status!=='pago'&&online()?`<button class="btn sm" onclick="pagarOnline(${h.id})">Pagar</button>`:payBadge(statusMens(h,cfg))}</div>`).join('')}`:''}`}
+const online=()=>!!(S.D.cfg&&S.D.cfg.infinitepay_handle);
+function pagarOnline(mid){act(async()=>{const r=await sb.functions.invoke('pagamento',{body:{aluno_id:S.aluno.id,mensalidade_id:mid||null}});
+  if(r.error){let msg=r.error.message;try{const b=await r.error.context.json();msg=b.erro||msg}catch(e){}throw new Error(msg)}
+  const d=r.data||{};if(!d.url)throw new Error(d.erro||'Não foi possível abrir o pagamento.');
+  toast('Abrindo a InfinitePay...');setTimeout(()=>{location.href=d.url},300)})}
 function aPerfil(){if(S.sub)return backBar('Perfil')+({grad:aGrad,comp:aComp,contrato:aContrato,redes:aRedes}[S.sub]||aGrad)();
   const a=S.aluno,D=S.D;const pend=(D.comps||[]).filter(c=>c.status==='pendente').length;const ok=contratoOk(a,D.cfg);const ctx=contextos();
   return `<div class="card prof-h"><div class="av">${initials(a.nome)}</div><h2>${esc(a.nome)}</h2><small class="mut">${MODS[S.mod].nome}${a.aluno_desde?' • aluno desde '+br(a.aluno_desde).slice(3):''}</small>${belt(S.mod,a.faixa,a.grau,230)}<b>${faixaNome(S.mod,a.faixa,a.grau)}</b>
@@ -527,10 +550,13 @@ function gFin(){const D=S.D,cfg=D.cfg||{preco:0,dia_vencimento:10};const mens=D.
   ${mens.length?[...mens].sort((x,y)=>ord[statusMens(x,cfg)]-ord[statusMens(y,cfg)]||nomeAluno(x.aluno_id).localeCompare(nomeAluno(y.aluno_id))).map(m=>{const s=statusMens(m,cfg);return `<div class="li"><div class="av" style="width:34px;height:34px;font-size:11px">${initials(nomeAluno(m.aluno_id))}</div><div class="grow">${esc(nomeAluno(m.aluno_id))}<small>${m.status==='pago'?'Pago via '+(m.metodo||'—')+(m.pago_em?' em '+brCurto(m.pago_em.slice(0,10)):''):money(m.valor)+' • vence '+pad(cfg.dia_vencimento)+'/'+D.mi.slice(5,7)}</small></div>${m.status==='pago'?`<button class="badge b-ok" style="border:0" onclick="if(confirmar(this))desfazerPag(${m.id})">Pago</button>`:`<button class="btn sm ok" onclick="pagSheet(${m.id})">Registrar</button>`}</div>`}).join(''):'<div class="empty">Nenhuma mensalidade neste mês (sem alunos ativos).</div>'}
   <div class="sec-t">Configuração</div>
   <div class="card"><div class="gap8"><div style="flex:1"><label class="lbl" style="margin-top:0">Valor (R$)</label><input class="in sm" id="cf_p" type="number" step="0.01" inputmode="decimal" value="${cfg.preco}"></div><div style="flex:1"><label class="lbl" style="margin-top:0">Vencimento (dia)</label><input class="in sm" id="cf_d" type="number" min="1" max="28" value="${cfg.dia_vencimento}"></div></div>
+  <label class="lbl">Sua InfiniteTag (pagamento pelo app)</label><div class="search"><span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--mut);font-weight:700">$</span><input class="in sm" id="cf_tag" style="padding-left:28px" autocapitalize="none" autocorrect="off" placeholder="suatag" value="${esc((cfg.infinitepay_handle||'').replace(/^\$/,''))}"></div>
+  <p class="mut tiny mt8">${cfg.infinitepay_handle?'<b style="color:var(--ok)">Pagamento pelo app ativo.</b> Os alunos pagam por Pix ou cartão e o app marca como pago sozinho.':'Preencha para os alunos pagarem por Pix ou cartão direto no app. Deixe vazio para desativar.'}</p>
   <button class="btn sm mt12" style="width:100%" onclick="salvarCfg()">Salvar</button><p class="mut tiny mt8">O novo valor vale para as próximas mensalidades geradas.</p></div>`}
 function confirmar(b){if(b.dataset.c){return true}b.dataset.c=1;b.textContent='Desfazer?';b.className='badge b-warn';setTimeout(()=>{if(b.isConnected){delete b.dataset.c;b.textContent='Pago';b.className='badge b-ok'}},3000);return false}
 function salvarCfg(){const p=parseFloat($('#cf_p').value),d=parseInt($('#cf_d').value);if(!(p>=0)||!(d>=1&&d<=28)){toast('Confira valor e dia (1 a 28)',true);return}
-  act(async()=>{await q(sb.from('config').update({preco:p,dia_vencimento:d}).eq('modalidade',S.mod));await loadData();render(true);toast('Configuração salva')})}
+  const tag=($('#cf_tag').value||'').trim().replace(/^[$@]/,'').toLowerCase();if(tag&&!/^[a-z0-9_.-]{2,40}$/.test(tag)){toast('InfiniteTag inválida. Use só letras, números, _ ou .',true);return}
+  act(async()=>{await q(sb.from('config').update({preco:p,dia_vencimento:d,infinitepay_handle:tag||null}).eq('modalidade',S.mod));await loadData();render(true);toast('Configuração salva')})}
 function gEquipe(){const D=S.D;const eq=D.equipe||[];const aux=eq.filter(e=>e.papel==='aux');const conv=(D.convites||[]).filter(c=>c.papel==='aux');
   return `<div class="h1 mt8">Equipe</div>
   ${eq.filter(e=>e.papel==='resp').map(e=>`<div class="li mt12"><div class="av" style="border:2px solid var(--acc)">${initials(e.nome)}</div><div class="grow">Prof. ${esc(e.nome||'')}<small>Responsável • acesso completo</small></div></div>`).join('')}
