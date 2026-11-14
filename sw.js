@@ -1,6 +1,6 @@
 // Service worker: deixa o app instalável e abrindo rápido
-const CACHE = 'academia-v3';
-const CORE = ['./', './index.html', './style.css?v=3', './app.js?v=3', './config.js?v=3', './manifest.webmanifest',
+const CACHE = 'academia-v4';
+const CORE = ['./', './index.html', './style.css?v=4', './app.js?v=4', './config.js?v=4', './manifest.webmanifest',
   './img/jj_logo.webp', './img/judo_logo.webp', './img/judo_bg.jpg', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
@@ -20,4 +20,21 @@ self.addEventListener('fetch', e => {
     e.respondWith(caches.open(CACHE).then(c => c.match(req).then(hit => hit || fetch(req).then(r => { c.put(req, r.clone()); return r; }))));
   }
   // chamadas ao Supabase passam direto (sempre dados atualizados)
+});
+
+// Notificações (avisos de mensalidade)
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { corpo: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.titulo || 'Jiu-Jitsu e Judô', {
+    body: d.corpo || '', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: d.tag || undefined, data: { url: d.url || './' }
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+    for (const c of cs) { if ('focus' in c) { if ('navigate' in c) c.navigate(url).catch(() => {}); return c.focus(); } }
+    return clients.openWindow(url);
+  }));
 });

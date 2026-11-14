@@ -83,7 +83,8 @@ async function criar(user, body) {
     if (!m) return json({ erro: 'Mensalidade não encontrada.' }, 404);
   } else {
     const comp = hojeBelem().slice(0, 8) + '01';
-    await admin.from('mensalidades').upsert({ aluno_id: a.id, modalidade: a.modalidade, competencia: comp, valor: cfg.preco },
+    const { data: va } = await admin.from('valores_alunos').select('valor').eq('aluno_id', a.id).maybeSingle();
+    await admin.from('mensalidades').upsert({ aluno_id: a.id, modalidade: a.modalidade, competencia: comp, valor: va?.valor ?? cfg.preco },
       { onConflict: 'aluno_id,competencia', ignoreDuplicates: true });
     ({ data: m } = await admin.from('mensalidades').select('*').eq('aluno_id', a.id).eq('competencia', comp).maybeSingle());
   }

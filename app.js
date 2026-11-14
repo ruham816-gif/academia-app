@@ -89,12 +89,15 @@ const ERROS=[[/Invalid login credentials/i,'E-mail ou senha incorretos.'],[/alre
  [/rate limit|too many/i,'Muitas tentativas. Aguarde alguns minutos.'],[/invalid email|Unable to validate email/i,'E-mail inválido.'],[/duplicate key/i,'Esse registro já existe.']];
 const traduz=m=>{for(const [r,t] of ERROS)if(r.test(m||''))return t;return m||'Algo deu errado. Tente de novo.'};
 async function q(p){const r=await p;if(r&&r.error){const e=new Error(traduz(r.error.message));e.orig=r.error;console.error(r.error);throw e}return r?r.data:null}
+async function qs(p,fallback){try{return await q(p)}catch(e){console.warn('opcional',e);return typeof fallback==='function'?await fallback():fallback}} // tolera banco ainda não atualizado
 async function act(fn){busy(true);try{await fn()}catch(e){console.error(e);toast(e.message||'Erro',true)}finally{busy(false)}}
 const uid=()=>S.sess&&S.sess.user.id;
 
 /* ---------- retorno da tela de pagamento ---------- */
 const RET=(()=>{try{const u=new URL(location.href);if(u.searchParams.get('pagamento')==='retorno'){const g=k=>u.searchParams.get(k);
   const o={order_nsu:g('order_nsu'),transaction_nsu:g('transaction_nsu'),slug:g('slug'),receipt_url:g('receipt_url'),capture_method:g('capture_method')};history.replaceState(null,'',u.pathname);return o}}catch(e){}return null})();
+
+const ABRIR=(()=>{const h=location.hash.replace('#','');if(h==='mensalidade'){history.replaceState(null,'',location.pathname+location.search);return h}return null})();
 
 /* ---------- estado ---------- */
 let S={mod:LS.get('mod'),scr:'boot',sess:null,ctx:null,role:null,aluno:null,pname:'',tab:null,sub:null,rk:'comp',mat:null,D:{},ch:null,chData:null,newImg:null,newBlob:null,legDraft:'',cad:{}};
@@ -137,7 +140,9 @@ async function decide(){const c=S.ctx;LS.set('mod',S.mod);S.sub=null;S.ch=null;S
   if(pp){S.role=pp.papel;S.pname=pp.nome||c.perfil.nome||'Professor';S.aluno=null;if(!STAFF_TABS.includes(S.tab)||(S.tab==='gestao'&&S.role!=='resp'))S.tab='painel'}
   else{const al=c.alunos.filter(x=>x.modalidade===S.mod&&x.status==='ativo');
     if(!al.length){S.role=null;S.scr=c.alunos.some(x=>x.modalidade===S.mod&&x.status==='pendente')?'aguardando':'semvinculo';render();return}
-    S.role='aluno';const pref=LS.get('aluno_'+S.mod);S.aluno=al.find(x=>x.id===pref)||al[0];if(STAFF_TABS.includes(S.tab)||!S.tab)S.tab='inicio'}
+    S.role='aluno';const pref=LS.get('aluno_'+S.mod);S.aluno=al.find(x=>x.id===pref)||al[0];if(STAFF_TABS.includes(S.tab)||!S.tab)S.tab='inicio';
+    if(ABRIR==='mensalidade'&&!S.abriu){S.tab='mensal';S.abriu=true}
+    sincronizarNotif()}
   S.scr='carregando';render();await loadData();S.scr='app';render()}
 async function refresh(){busy(true);try{await loadData();render(true)}catch(e){toast(e.message,true)}finally{busy(false)}}
 
@@ -159,7 +164,7 @@ async function loadData(){const m=S.mod,D={};const mi=mesIni(),prox=addMes(mi,1)
       q(sb.from('competicoes').select('*').eq('aluno_id',a).order('data',{ascending:false})).then(r=>D.comps=r||[]),
       q(sb.from('mensalidades').select('*').eq('aluno_id',a).order('competencia',{ascending:false}).limit(12)).then(r=>D.mens=r||[]),
       q(sb.from('graduacoes').select('*').eq('aluno_id',a).order('data',{ascending:true}).order('id',{ascending:true})).then(r=>D.grads=r||[]),
-      q(sb.from('config').select('*').eq('modalidade',m).maybeSingle()).then(r=>D.cfg=r));
+      qs(sb.rpc('config_aluno',{p_mod:m}),async()=>[await qs(sb.from('config').select('*').eq('modalidade',m).maybeSingle(),null)]).then(r=>D.cfg=(r||[])[0]||null));
   }else{
     L.push(
       q(sb.from('alunos').select('*').eq('modalidade',m).order('nome')).then(r=>D.alunos=r||[]),
@@ -168,6 +173,7 @@ async function loadData(){const m=S.mod,D={};const mi=mesIni(),prox=addMes(mi,1)
     if(S.role==='resp')L.push(
       q(sb.from('config').select('*').eq('modalidade',m).maybeSingle()).then(r=>D.cfg=r),
       q(sb.from('papeis').select('*').eq('modalidade',m)).then(r=>D.equipe=r||[]),
+      qs(sb.from('valores_alunos').select('*').eq('modalidade',m),[]).then(r=>D.valores=r||[]),
       q(sb.from('convites_staff').select('*').eq('modalidade',m)).then(r=>D.convites=r||[]),
       (async()=>{await q(sb.rpc('gerar_mensalidades',{p_mod:m,p_comp:mi}));D.mens=await q(sb.from('mensalidades').select('*').eq('modalidade',m).eq('competencia',mi))||[]})());
   }
@@ -198,8 +204,11 @@ function feedCard(f){if(!f)return `<div class="feed">${phArt()}<div class="ov"><
 function kingCard(t,n,info){return `<div class="king"><span class="lab">Rei do Tatame</span><b class="kt">${t}</b><div class="kav">${crown()}${initials(n)}</div><p class="kn">${esc(n)}</p><small class="mut">${info}</small></div>`}
 function kingVazio(t){return `<div class="king" style="opacity:.6"><span class="lab">Rei do Tatame</span><b class="kt">${t}</b><div class="kav">${crown()}?</div><p class="kn">A definir</p><small class="mut">sem dados ainda</small></div>`}
 let fotoBlob=null;
+const hdPath=p=>String(p).replace(/\.jpg$/,'_hd.jpg');
 async function baixarFoto(){const f=S.D.feed;if(!f||!f.url)return;const nome=('treino-'+MODS[S.mod].nome+'-'+iso(new Date(f.criado_em))+'.jpg').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  try{if(!fotoBlob||fotoBlob.path!==f.foto_path){busy(true);try{const r=await fetch(f.url);if(!r.ok)throw new Error('http');fotoBlob={path:f.foto_path,blob:await r.blob()}}finally{busy(false)}}
+  try{if(!fotoBlob||fotoBlob.path!==f.foto_path){busy(true);try{let r=null;
+      try{const s=await sb.storage.from('feed').createSignedUrl(hdPath(f.foto_path),600);if(s.data&&s.data.signedUrl){r=await fetch(s.data.signedUrl);if(!r.ok)r=null}}catch(e){r=null}
+      if(!r)r=await fetch(f.url);if(!r.ok)throw new Error('http');fotoBlob={path:f.foto_path,blob:await r.blob()}}finally{busy(false)}}
     const file=new File([fotoBlob.blob],nome,{type:'image/jpeg'});
     if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:'Foto do treino'});return}catch(e){if(e.name==='AbortError')return;if(e.name==='NotAllowedError'){toast('Foto pronta! Toque em Baixar de novo.');return}}}
     const u=URL.createObjectURL(fotoBlob.blob);const a=document.createElement('a');a.href=u;a.download=nome;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),5000);toast('Foto baixada')}
@@ -279,7 +288,7 @@ function vAguardando(){const m=MODS[S.mod];const outros=contextos();return `<div
   <button class="btn ghost" onclick="iniciarMat()">${ic('plus')}Matricular outra pessoa</button>
   ${outros.map(o=>`<button class="btn ghost" onclick="trocarPara('${o.mod}','${o.id||''}')">${ic('swap')}Ir para ${o.label}</button>`).join('')}
   <button class="link mt8" onclick="sair()">Sair da conta</button></div></div>`}
-async function sair(){closeSheet();try{await sb.auth.signOut()}catch(e){}S={...S,sess:null,ctx:null,role:null,aluno:null,tab:null,sub:null,D:{},scr:S.mod?'entrada':'escolha'};render()}
+async function sair(){closeSheet();await removerNotif();try{await sb.auth.signOut()}catch(e){}S={...S,sess:null,ctx:null,role:null,aluno:null,tab:null,sub:null,D:{},scr:S.mod?'entrada':'escolha'};render()}
 function trocarPara(mod,id){closeSheet();S.mod=mod;if(id)LS.set('aluno_'+mod,id);act(decide)}
 
 /* ---------- matrícula ---------- */
@@ -337,6 +346,29 @@ function instalarCard(){if(standalone())return '';const ios=/iphone|ipad|ipod/i.
   return `<div class="card mt12"><div class="row">${ic('download')}<b>Instalar no celular</b></div><p class="mut mt8" style="font-size:13px">${deferredPrompt?'Toque no botão para instalar o app.':ios?'No Safari, toque em Compartilhar e depois em "Adicionar à Tela de Início".':'No menu do navegador (⋮), toque em "Instalar app" ou "Adicionar à tela inicial".'}</p>${deferredPrompt?`<button class="btn sm mt8" onclick="instalar()">Instalar app</button>`:''}</div>`}
 async function instalar(){if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;closeSheet()}
 
+/* ---------- notificações no celular ---------- */
+const ios=()=>/iphone|ipad|ipod/i.test(navigator.userAgent);
+const pushOk=()=>'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
+function notifEstado(){if(!pushOk())return ios()&&!standalone()?'instalar':'sem-suporte';if(Notification.permission==='denied')return 'bloqueado';
+  return Notification.permission==='granted'&&LS.get('notif')==='on'?'on':'off'}
+function b64ToU8(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const b=atob(s);return Uint8Array.from(b,c=>c.charCodeAt(0))}
+async function inscreverPush(){const reg=await navigator.serviceWorker.ready;let sub=await reg.pushManager.getSubscription();
+  if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(CFG.VAPID_PUBLIC)});
+  const j=sub.toJSON();await q(sb.rpc('salvar_inscricao',{p_endpoint:j.endpoint,p_p256dh:j.keys.p256dh,p_auth:j.keys.auth}));return j.endpoint}
+function ativarNotif(){const e=notifEstado();
+  if(e==='instalar'){toast('No iPhone, primeiro instale o app: Compartilhar → Adicionar à Tela de Início.',true);return}
+  if(e==='sem-suporte'){toast('Este navegador não aceita notificações.',true);return}
+  if(e==='bloqueado'){toast('As notificações estão bloqueadas. Libere nas configurações do celular.',true);return}
+  act(async()=>{const perm=await Notification.requestPermission();if(perm!=='granted'){toast('Você não permitiu as notificações.',true);return}
+    await inscreverPush();LS.set('notif','on');render(true);toast('Notificações ativadas!');
+    try{await sb.functions.invoke('notificar',{body:{acao:'teste'}})}catch(e){}})}
+async function sincronizarNotif(){try{if(notifEstado()==='on')await inscreverPush()}catch(e){console.error('notif',e)}}
+async function removerNotif(){try{if(!pushOk())return;const reg=await navigator.serviceWorker.getRegistration();const sub=reg&&await reg.pushManager.getSubscription();
+  if(sub)await sb.rpc('remover_inscricao',{p_endpoint:sub.endpoint})}catch(e){}}
+function notifCard(){const e=notifEstado();if(e==='on'||e==='sem-suporte')return '';
+  const txt={off:'Ative para receber um aviso quando a mensalidade estiver vencendo ou atrasada.',instalar:'No iPhone, as notificações funcionam com o app instalado: toque em Compartilhar → "Adicionar à Tela de Início" e abra o app pelo ícone.',bloqueado:'As notificações estão bloqueadas para este app. Libere nas configurações do celular.'}[e];
+  return `<div class="card mt12"><div class="row">${ic('bell')}<b>Avisos no celular</b></div><p class="mut mt8" style="font-size:13px">${txt}</p>${e==='off'?`<button class="btn sm mt8" onclick="ativarNotif()">${ic('bell')}Ativar notificações</button>`:''}</div>`}
+
 /* ---------- ALUNO ---------- */
 function rankRows(r){return (r||[]).map(x=>({a:{id:x.aluno_id,nome:x.nome},pts:x.pts,ouros:x.ouros,comps:x.comps,freq:x.freq}))}
 function aInicio(){const D=S.D,a=S.aluno,mi=D.mi;const rc=ordComp(rankRows(D.rank)),rf=ordFreq(rankRows(D.rank));const pc=rc.findIndex(s=>s.a.id===a.id),pf=rf.findIndex(s=>s.a.id===a.id);
@@ -346,6 +378,7 @@ function aInicio(){const D=S.D,a=S.aluno,mi=D.mi;const rc=ordComp(rankRows(D.ran
   return `<div class="hello"><small>Bem-vindo de volta</small><h1 class="h1">Olá, ${esc(first(a.nome))}</h1></div>
   ${!contratoOk(a,D.cfg)?`<button class="warnbox" onclick="go({tab:'perfil',sub:'contrato'})">${ic('alert')}<span><b>Contrato aguardando seu aceite.</b><br>Toque para ler e aceitar.</span></button>`:''}
   ${st!=='pago'&&online()?`<button class="warnbox" onclick="go({tab:'mensal'})">${ic('money')}<span><b>Mensalidade de ${nomeMes(mi).toLowerCase()} ${st==='atrasado'?'atrasada':'em aberto'}.</b><br>Toque para pagar por Pix ou cartão.</span></button>`:''}
+  ${notifEstado()==='off'&&LS.get('notif_banner')!=='x'?`<div class="warnbox" style="border-color:rgba(255,255,255,.15);background:var(--card)">${ic('bell')}<span style="flex:1"><b>Receba avisos da mensalidade</b><br>Um lembrete quando estiver vencendo ou atrasada.<br><button class="btn sm mt8" onclick="ativarNotif()">Ativar</button> <button class="link" onclick="LS.set('notif_banner','x');render(true)">Agora não</button></span></div>`:''}
   ${feedCard(D.feed)}
   <div class="sec-t">Avisos ${D.avisos.length?`<span class="cnt">${D.avisos.length}</span>`:''}</div>
   <div>${D.avisos.length?D.avisos.slice(0,5).map(v=>`<div class="aviso">${ic('bell')}<div><p>${esc(v.texto)}</p><small>${esc(v.autor_nome||'')} • ${quando(v.criado_em)}</small></div></div>`).join(''):'<div class="empty">Nenhum aviso no momento.</div>'}</div>
@@ -374,10 +407,11 @@ function vRanking(){const D=S.D,k=S.rk;const list=k==='comp'?ordComp(rankRows(D.
   ${list.length?`<div class="podium">${pod}</div><div>${rows}</div>`:`<div class="empty mt16">${k==='comp'?'Nenhum resultado de competição confirmado neste mês ainda.':'Nenhuma presença registrada neste mês ainda.'}</div>`}
   <div class="card mt16 rules"><b>Como funciona</b>${k==='comp'?`<div class="pts"><div><b>3</b>Ouro</div><div><b>2</b>Prata</div><div><b>1</b>Bronze</div><div><b>1</b>Particip.</div></div><ol class="mt8"><li>Mais pontos no mês</li><li>Desempate: mais ouros</li><li>Depois: mais competições</li><li>Por último: mais treinos</li></ol><p class="mut tiny mt8">Só contam resultados confirmados pelo professor.</p>`:`<ol class="mt8"><li>Mais presenças nos treinos do mês</li><li>Desempate: mais competições no mês</li></ol>`}</div>
   ${hist?`<div class="sec-t">Campeões anteriores</div>${hist}`:''}`}
-function aMensal(){const D=S.D,a=S.aluno,cfg=D.cfg||{preco:0,dia_vencimento:10};const mi=D.mi;const row=(D.mens||[]).find(x=>x.competencia===mi);const st=statusMens(row,cfg);
+function aMensal(){const D=S.D,a=S.aluno,cfg=D.cfg||{dia_vencimento:10};const mi=D.mi;const row=(D.mens||[]).find(x=>x.competencia===mi);const st=statusMens(row,cfg);
   const label={pago:'Em dia',pendente:'Pendente',atrasado:'Atrasada'}[st];const hist=(D.mens||[]).filter(x=>x.competencia!==mi);
   return `<div class="hello"><small>${MODS[S.mod].nome}</small><h1 class="h1">Mensalidade</h1></div>
-  <div class="paycard ${st}"><span class="st" style="color:${st==='pago'?'#4ee28a':st==='pendente'?'#ffcc3d':'#ff7a7a'}">${label}</span><div class="big">${money(row?row.valor:cfg.preco)}</div><small class="mut">${nomeMes(mi)}/${mi.slice(0,4)} • vencimento ${pad(cfg.dia_vencimento)}/${mi.slice(5,7)}</small>
+  <div class="paycard ${st}"><span class="st" style="color:${st==='pago'?'#4ee28a':st==='pendente'?'#ffcc3d':'#ff7a7a'}">${label}</span><div class="big">${row?money(row.valor):'—'}</div><small class="mut">${nomeMes(mi)}/${mi.slice(0,4)} • vencimento ${pad(cfg.dia_vencimento)}/${mi.slice(5,7)}</small>
+  ${!row?`<p class="mut tiny mt8">O valor aparece aqui assim que o professor gerar a mensalidade do mês.</p>`:''}
   ${st==='pago'?`<p class="mt12" style="font-size:14px">Pago${row.metodo?' via <b>'+row.metodo+'</b>':''}${row.pago_em?' em '+br(row.pago_em.slice(0,10)):''}.</p>`:''}</div>
   ${st!=='pago'&&online()?`<button class="btn mt12" onclick="pagarOnline(${row?row.id:'null'})">${ic('money')}Pagar agora — Pix ou cartão</button><p class="mut tiny mt8" style="text-align:center">Pagamento seguro pela InfinitePay. Pix sem taxa; cartão em até 12x.</p>`:''}
   ${st!=='pago'&&!online()?`<div class="info">${ic('info')}<span>Pague diretamente ao professor responsável (Pix ou em espécie). Ele registra o pagamento aqui no app.</span></div>`:''}
@@ -400,7 +434,7 @@ function aPerfil(){if(S.sub)return backBar('Perfil')+({grad:aGrad,comp:aComp,con
    ${ctx.length>1||S.ctx.alunos.filter(x=>x.modalidade===S.mod&&x.status==='ativo').length>1?`<button class="li" onclick="trocaSheet()">${ic('swap')}<div class="grow">Trocar perfil<small>Outra modalidade ou outro aluno</small></div>${ic('chev')}</button>`:''}
    <button class="li" onclick="go({scr:'escolha'})">${ic('plus')}<div class="grow">Matrícula em outra modalidade</div>${ic('chev')}</button>
    <button class="li" onclick="sair()">${ic('logout')}<div class="grow">Sair<small>${esc(S.sess.user.email)}</small></div></button>
-  </div>${instalarCard()}`}
+  </div>${notifCard()}${notifEstado()==='on'?`<div class="li mt12">${ic('bell')}<div class="grow">Notificações ativadas<small>Você recebe os avisos de mensalidade</small></div><span class="badge b-ok">Ativas</span></div>`:''}${instalarCard()}`}
 function aGrad(){const a=S.aluno,g=S.D.grads||[];return `<div class="card prof-h"><small class="mut">Faixa atual</small>${belt(S.mod,a.faixa,a.grau,260)}<h2>${faixaNome(S.mod,a.faixa,a.grau)}</h2></div>
   <div class="sec-t">Histórico</div>${g.length?`<div class="card"><div class="tl">${[...g].reverse().map(h=>`<div><b>${faixaNome(S.mod,h.faixa,h.grau)}</b><br><small>${br(h.data)}</small></div>`).join('')}</div>`:'<div class="empty">Sem histórico ainda.</div>'}
   <div class="info">${ic('info')}<span>A graduação é atualizada somente pelo professor responsável.</span></div>`}
@@ -427,6 +461,8 @@ function salvarComp(isProf){const ev=$('#k_ev').value.trim(),dt=$('#k_dt').value
   act(async()=>{await q(sb.from('competicoes').insert(row));closeSheet();await loadData();render(true);toast(isProf?'Resultado lançado':'Enviado! Aguardando confirmação')})}
 
 /* ---------- PROFESSOR ---------- */
+const valorDe=id=>(S.D.valores||[]).find(v=>v.aluno_id===id);
+const precoPadrao=()=>Number((S.D.cfg||{}).preco||0);
 const ativos=()=>(S.D.alunos||[]).filter(a=>a.status==='ativo');
 const nomeAluno=id=>{const a=(S.D.alunos||[]).find(x=>x.id===id);return a?a.nome:'—'};
 function pPainel(){if(S.sub==='ranking')return backBar('Painel')+vRanking();
@@ -473,14 +509,19 @@ function pPublicar(){const D=S.D;const img=S.newImg;
   <textarea class="in" id="avtxt" placeholder="Ex.: Não haverá treino no feriado."></textarea>
   <button class="btn mt8" onclick="publicarAviso()">${ic('bell')}Publicar aviso</button>
   <div class="mt12">${D.avisos.map(v=>`<div class="aviso">${ic('bell')}<div><p>${esc(v.texto)}</p><small>${esc(v.autor_nome||'')} • ${quando(v.criado_em)}</small></div><button class="x" onclick="apagarAviso(${v.id})" aria-label="Apagar">${ic('x')}</button></div>`).join('')}</div>`}
+// Duas versões: leve para o feed (todo mundo vê) e alta qualidade só para quem toca em "Baixar"
+const FOTO_FEED={max:1080,q:.8},FOTO_HD={max:2048,q:.9};
+function reduzir(im,cfg){return new Promise(res=>{const k=Math.min(1,cfg.max/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+  c.getContext('2d').drawImage(im,0,0,c.width,c.height);c.toBlob(b=>res(b),'image/jpeg',cfg.q)})}
 function lerFoto(inp){const f=inp.files&&inp.files[0];if(!f)return;S.legDraft=$('#leg').value;const r=new FileReader();
-  r.onload=e=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
-    c.toBlob(b=>{S.newBlob=b;S.newImg=URL.createObjectURL(b);render(true)},'image/jpeg',.8)};im.onerror=()=>toast('Não consegui abrir essa imagem',true);im.src=e.target.result};r.readAsDataURL(f)}
+  r.onload=e=>{const im=new Image();im.onload=async()=>{const [b1,b2]=await Promise.all([reduzir(im,FOTO_FEED),reduzir(im,FOTO_HD)]);
+    S.newBlob=b1;S.newHd=b2;S.newImg=URL.createObjectURL(b1);render(true)};im.onerror=()=>toast('Não consegui abrir essa imagem',true);im.src=e.target.result};r.readAsDataURL(f)}
 function publicarFoto(){if(!S.newBlob){toast('Escolha uma foto primeiro',true);return}const leg=$('#leg').value.trim()||'Treino de hoje';
   act(async()=>{const path=`${S.mod}/${Date.now()}.jpg`;await q(sb.storage.from('feed').upload(path,S.newBlob,{contentType:'image/jpeg',upsert:false}));
-    await q(sb.from('feed').insert({modalidade:S.mod,foto_path:path,legenda:leg,autor_nome:autor()}));await apagarFotosAntigas(path);S.newImg=null;S.newBlob=null;S.legDraft='';await loadData();render(true);toast('Foto publicada no feed')})}
+    if(S.newHd){try{await q(sb.storage.from('feed').upload(hdPath(path),S.newHd,{contentType:'image/jpeg',upsert:false}))}catch(e){console.error('versão HD',e)}}
+    await q(sb.from('feed').insert({modalidade:S.mod,foto_path:path,legenda:leg,autor_nome:autor()}));await apagarFotosAntigas(path);S.newImg=null;S.newBlob=null;S.newHd=null;S.legDraft='';await loadData();render(true);toast('Foto publicada no feed')})}
 async function apagarFotosAntigas(manter){try{const r=await sb.from('feed').select('id,foto_path').eq('modalidade',S.mod).neq('foto_path',manter);const old=r.data||[];if(!old.length)return;
-  await sb.storage.from('feed').remove(old.map(o=>o.foto_path));await sb.from('feed').delete().in('id',old.map(o=>o.id))}catch(e){console.error('limpeza de fotos',e)}}
+  await sb.storage.from('feed').remove(old.flatMap(o=>[o.foto_path,hdPath(o.foto_path)]));await sb.from('feed').delete().in('id',old.map(o=>o.id))}catch(e){console.error('limpeza de fotos',e)}}
 function publicarAviso(){const t=$('#avtxt').value.trim();if(!t){toast('Escreva o aviso',true);return}act(async()=>{await q(sb.from('avisos').insert({modalidade:S.mod,texto:t,autor_nome:autor()}));await loadData();render(true);toast('Aviso publicado')})}
 function apagarAviso(id){act(async()=>{await q(sb.from('avisos').delete().eq('id',id));await loadData();render(true);toast('Aviso removido')})}
 function pComps(){const D=S.D;const pend=(D.comps||[]).filter(c=>c.status==='pendente'),ok=(D.comps||[]).filter(c=>c.status==='confirmado'&&c.data>=D.mi);
@@ -520,14 +561,17 @@ function novoAlunoSheet(){openSheet(`<h3>Cadastrar aluno</h3><p class="mut">O al
   <label class="lbl">Responsável (se menor de idade)</label><input class="in" id="n_resp">
   <label class="lbl">E-mail de quem vai usar o app (opcional)</label><input class="in" id="n_email" type="email" inputmode="email">
   <label class="lbl">Faixa</label><select class="in" id="n_faixa">${BELTS[S.mod].map((b,i)=>`<option value="${i}">${b[0]}</option>`).join('')}</select>
+  <label class="lbl">Valor da mensalidade (opcional)</label><input class="in" id="n_val" type="number" step="0.01" min="0" inputmode="decimal" placeholder="${precoPadrao().toFixed(2).replace('.',',')} (padrão)">
   <button class="btn mt16" onclick="salvarNovo()">Cadastrar</button>`)}
 function salvarNovo(){const nome=$('#n_nome').value.trim(),nasc=$('#n_nasc').value;if(!nome||!nasc){toast('Preencha nome e nascimento',true);return}const menor=idade(nasc)<18;const resp=$('#n_resp').value.trim();
   if(menor&&!resp){toast('Informe o responsável',true);return}
-  act(async()=>{await q(sb.from('alunos').insert({modalidade:S.mod,nome,nascimento:nasc,telefone:$('#n_tel').value.trim()||null,resp_nome:resp||null,acesso:menor?'responsavel':'aluno',email_acesso:$('#n_email').value.trim()||null,faixa:+$('#n_faixa').value,status:'ativo'}));
+  const vt=$('#n_val').value.trim().replace(',','.');const v=vt===''?null:parseFloat(vt);if(vt!==''&&!(v>=0)){toast('Valor inválido',true);return}
+  act(async()=>{const novo=await q(sb.from('alunos').insert({modalidade:S.mod,nome,nascimento:nasc,telefone:$('#n_tel').value.trim()||null,resp_nome:resp||null,acesso:menor?'responsavel':'aluno',email_acesso:$('#n_email').value.trim()||null,faixa:+$('#n_faixa').value,status:'ativo'}).select('id').single());
+    if(v!==null&&novo&&novo.id)await q(sb.from('valores_alunos').upsert({aluno_id:novo.id,modalidade:S.mod,valor:v},{onConflict:'aluno_id'}));
     closeSheet();await loadData();render(true);toast('Aluno cadastrado')})}
 function gAlunos(){const l=(S.D.alunos||[]).filter(a=>a.status==='ativo'||a.status==='inativo');const mrow=id=>(S.D.mens||[]).find(x=>x.aluno_id===id);
   return `<div class="h1 mt8">Alunos</div><div class="search mt12">${ic('search')}<input class="in" placeholder="Buscar aluno" oninput="filtra(this.value)"></div>
-  <div class="mt12">${l.length?l.map(a=>`<button class="li fa" style="${a.status==='inativo'?'opacity:.5':''}" data-n="${esc(a.nome.toLowerCase())}" onclick="alunoSheet('${a.id}')"><div class="av">${initials(a.nome)}</div><div class="grow">${esc(a.nome)}<small>${bdot(S.mod,a.faixa)}${faixaNome(S.mod,a.faixa,a.grau)}${a.resp_nome?' • menor':''}${a.status==='inativo'?' • inativo':''}${!a.user_id?' • sem login':''}</small></div>${a.status==='ativo'?payBadge(statusMens(mrow(a.id),S.D.cfg)):''}</button>`).join(''):'<div class="empty">Nenhum aluno ainda.</div>'}</div>`}
+  <div class="mt12">${l.length?l.map(a=>`<button class="li fa" style="${a.status==='inativo'?'opacity:.5':''}" data-n="${esc(a.nome.toLowerCase())}" onclick="alunoSheet('${a.id}')"><div class="av">${initials(a.nome)}</div><div class="grow">${esc(a.nome)}<small>${bdot(S.mod,a.faixa)}${faixaNome(S.mod,a.faixa,a.grau)}${a.resp_nome?' • menor':''}${a.status==='inativo'?' • inativo':''}${!a.user_id?' • sem login':''}${valorDe(a.id)?' • '+money(valorDe(a.id).valor):''}</small></div>${a.status==='ativo'?payBadge(statusMens(mrow(a.id),S.D.cfg)):''}</button>`).join(''):'<div class="empty">Nenhum aluno ainda.</div>'}</div>`}
 function filtra(v){v=v.toLowerCase();document.querySelectorAll('.fa').forEach(e=>e.style.display=e.dataset.n.includes(v)?'':'none')}
 function alunoSheet(id){const a=(S.D.alunos||[]).find(x=>x.id===id),jj=S.mod==='jj',D=S.D;const m=(D.mens||[]).find(x=>x.aluno_id===id);const st=statusMens(m,D.cfg);const nPres=(D.pres||[]).filter(p=>p.aluno_id===id).length;const id2=idade(a.nascimento);
   openSheet(`<div class="row"><div class="av" style="width:54px;height:54px;font-size:17px;border:2px solid var(--acc)">${initials(a.nome)}</div><div><h3>${esc(a.nome)}</h3><small class="mut">${id2!=null?id2+' anos':''}${a.resp_nome?' • responsável: '+esc(a.resp_nome):''}${a.telefone?' • '+esc(a.telefone):''}</small></div></div>
@@ -539,12 +583,22 @@ function alunoSheet(id){const a=(S.D.alunos||[]).find(x=>x.id===id),jj=S.mod==='
   ${a.resp_nome?`<div class="radio"><button class="${a.acesso==='responsavel'?'on':''}" onclick="setCampo('${a.id}',{acesso:'responsavel'})">Responsável<br><small>${esc(first(a.resp_nome))}</small></button><button class="${a.acesso==='aluno'?'on':''}" onclick="setCampo('${a.id}',{acesso:'aluno'})">Próprio aluno<br><small>${esc(first(a.nome))}</small></button></div>`:''}
   <label class="lbl">E-mail de quem usa o app ${a.user_id?'<span class="badge b-ok">conta ligada</span>':'<span class="badge b-mut">sem conta</span>'}</label>
   <div class="gap8"><input class="in sm" id="g_em" type="email" value="${esc(a.email_acesso||'')}"><button class="btn sm" onclick="setCampo('${a.id}',{email_acesso:$('#g_em').value.trim()||null})">Salvar</button></div>
+  <hr class="sep"><b>Valor da mensalidade</b>
+  <div class="gap8 mt8"><div class="search" style="flex:1"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mut);font-weight:700">R$</span><input class="in sm" id="v_val" style="padding-left:38px" type="number" step="0.01" min="0" inputmode="decimal" placeholder="${precoPadrao().toFixed(2).replace('.',',')} (padrão)" value="${valorDe(a.id)?Number(valorDe(a.id).valor):''}"></div><button class="btn sm" onclick="salvarValor('${a.id}')">Salvar</button></div>
+  <input class="in sm mt8" id="v_obs" placeholder="Motivo do desconto (opcional)" value="${esc((valorDe(a.id)||{}).obs||'')}">
+  <p class="mut tiny mt8">Deixe vazio para usar o valor padrão (${money(precoPadrao())}). Só você e o próprio aluno veem esse valor.</p>
   ${a.status==='ativo'?`<hr class="sep"><div class="row" style="justify-content:space-between"><b>Mensalidade de ${nomeMes(D.mi).toLowerCase()}</b>${payBadge(st)}</div>
-  <p class="mut mt8" style="font-size:13px">${money(m?m.valor:(D.cfg||{}).preco)}${m&&m.status==='pago'?' • pago'+(m.metodo?' via '+m.metodo:''):''}</p>
+  <p class="mut mt8" style="font-size:13px">${money(m?m.valor:(valorDe(a.id)?valorDe(a.id).valor:precoPadrao()))}${m&&m.status==='pago'?' • pago'+(m.metodo?' via '+m.metodo:''):''}</p>
   ${m&&m.status!=='pago'?`<button class="btn sm ok mt8" style="width:100%" onclick="pagSheet(${m.id})">${ic('money')}Registrar pagamento</button>`:''}`:''}
   <hr class="sep"><div class="row" style="justify-content:space-between"><b>Frequência</b><span>${nPres} treino${nPres!==1?'s':''} em ${nomeMes(D.mi).toLowerCase()}</span></div>
   <div class="row mt12" style="justify-content:space-between"><b>Contrato</b>${contratoOk(a,D.cfg)?'<span class="badge b-ok">Aceito</span>':'<span class="badge b-warn">Pendente</span>'}</div>
   ${a.status==='ativo'?`<button class="btn danger mt16" onclick="setCampo('${a.id}',{status:'inativo'},true)">Inativar aluno</button>`:`<button class="btn ok mt16" onclick="setCampo('${a.id}',{status:'ativo'},true)">Reativar aluno</button>`}`)}
+function salvarValor(id){const t=$('#v_val').value.trim().replace(',','.');const obs=$('#v_obs').value.trim()||null;const v=t===''?null:parseFloat(t);
+  if(t!==''&&!(v>=0)){toast('Valor inválido',true);return}
+  act(async()=>{if(v===null)await q(sb.from('valores_alunos').delete().eq('aluno_id',id));
+    else await q(sb.from('valores_alunos').upsert({aluno_id:id,modalidade:S.mod,valor:v,obs,atualizado_em:new Date().toISOString()},{onConflict:'aluno_id'}));
+    await q(sb.from('mensalidades').update({valor:v===null?precoPadrao():v}).eq('aluno_id',id).eq('competencia',S.D.mi).eq('status','pendente'));
+    await loadData();alunoSheet(id);render(true);toast(v===null?'Voltou ao valor padrão':'Valor salvo: '+money(v))})}
 function salvarGrad(id){const a=S.D.alunos.find(x=>x.id===id);const f=+$('#g_f').value,g=$('#g_g')?+$('#g_g').value:0;if(f===a.faixa&&g===a.grau){toast('Nenhuma alteração',true);return}
   act(async()=>{await q(sb.from('alunos').update({faixa:f,grau:g}).eq('id',id));await loadData();alunoSheet(id);render(true);toast('Graduação atualizada: '+faixaNome(S.mod,f,g))})}
 function setCampo(id,obj,fechar){act(async()=>{await q(sb.from('alunos').update(obj).eq('id',id));await loadData();if(fechar)closeSheet();else alunoSheet(id);render(true);toast('Salvo')})}
@@ -558,15 +612,14 @@ function gFin(){const D=S.D,cfg=D.cfg||{preco:0,dia_vencimento:10};const mens=D.
   <div class="sum3 mt12"><div class="stat"><b style="color:var(--ok)">${g('pago').length}</b><small>Em dia</small></div><div class="stat"><b style="color:var(--warn)">${g('pendente').length}</b><small>Pendentes</small></div><div class="stat"><b style="color:var(--bad)">${g('atrasado').length}</b><small>Atrasados</small></div></div>
   <div class="card mt12"><small class="mut">Recebido por forma de pagamento</small><div class="sum3 mt8"><div><b>${met('Cartão')}</b> <small class="mut">Cartão</small></div><div><b>${met('Pix')}</b> <small class="mut">Pix</small></div><div><b>${met('Espécie')}</b> <small class="mut">Espécie</small></div></div></div>
   <div class="sec-t">Alunos</div>
-  ${mens.length?[...mens].sort((x,y)=>ord[statusMens(x,cfg)]-ord[statusMens(y,cfg)]||nomeAluno(x.aluno_id).localeCompare(nomeAluno(y.aluno_id))).map(m=>{const s=statusMens(m,cfg);return `<div class="li"><div class="av" style="width:34px;height:34px;font-size:11px">${initials(nomeAluno(m.aluno_id))}</div><div class="grow">${esc(nomeAluno(m.aluno_id))}<small>${m.status==='pago'?'Pago via '+(m.metodo||'—')+(m.pago_em?' em '+brCurto(m.pago_em.slice(0,10)):''):money(m.valor)+' • vence '+pad(cfg.dia_vencimento)+'/'+D.mi.slice(5,7)}</small></div>${m.status==='pago'?`<button class="badge b-ok" style="border:0" onclick="if(confirmar(this))desfazerPag(${m.id})">Pago</button>`:`<button class="btn sm ok" onclick="pagSheet(${m.id})">Registrar</button>`}</div>`}).join(''):'<div class="empty">Nenhuma mensalidade neste mês (sem alunos ativos).</div>'}
+  ${mens.length?[...mens].sort((x,y)=>ord[statusMens(x,cfg)]-ord[statusMens(y,cfg)]||nomeAluno(x.aluno_id).localeCompare(nomeAluno(y.aluno_id))).map(m=>{const s=statusMens(m,cfg);return `<div class="li"><div class="av" style="width:34px;height:34px;font-size:11px">${initials(nomeAluno(m.aluno_id))}</div><div class="grow">${esc(nomeAluno(m.aluno_id))}<small>${m.status==='pago'?'Pago via '+(m.metodo||'—')+(m.pago_em?' em '+brCurto(m.pago_em.slice(0,10)):''):money(m.valor)+(valorDe(m.aluno_id)?' (valor próprio)':'')+' • vence '+pad(cfg.dia_vencimento)+'/'+D.mi.slice(5,7)}</small></div>${m.status==='pago'?`<button class="badge b-ok" style="border:0" onclick="if(confirmar(this))desfazerPag(${m.id})">Pago</button>`:`<button class="btn sm ok" onclick="pagSheet(${m.id})">Registrar</button>`}</div>`}).join(''):'<div class="empty">Nenhuma mensalidade neste mês (sem alunos ativos).</div>'}
   <div class="sec-t">Configuração</div>
-  <div class="card"><div class="gap8"><div style="flex:1"><label class="lbl" style="margin-top:0">Valor (R$)</label><input class="in sm" id="cf_p" type="number" step="0.01" inputmode="decimal" value="${cfg.preco}"></div><div style="flex:1"><label class="lbl" style="margin-top:0">Vencimento (dia)</label><input class="in sm" id="cf_d" type="number" min="1" max="28" value="${cfg.dia_vencimento}"></div></div>
-  <label class="lbl">Sua InfiniteTag (pagamento pelo app)</label><div class="search"><span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--mut);font-weight:700">$</span><input class="in sm" id="cf_tag" style="padding-left:28px" autocapitalize="none" autocorrect="off" placeholder="suatag" value="${esc((cfg.infinitepay_handle||'').replace(/^\$/,''))}"></div>
-  <p class="mut tiny mt8">${cfg.infinitepay_handle?'<b style="color:var(--ok)">Pagamento pelo app ativo.</b> Os alunos pagam por Pix ou cartão e o app marca como pago sozinho.':'Preencha para os alunos pagarem por Pix ou cartão direto no app. Deixe vazio para desativar.'}</p>
-  <button class="btn sm mt12" style="width:100%" onclick="salvarCfg()">Salvar</button><p class="mut tiny mt8">O novo valor vale para as próximas mensalidades geradas.</p></div>`}
+  <div class="card"><div class="gap8"><div style="flex:1"><label class="lbl" style="margin-top:0">Valor padrão (R$)</label><input class="in sm" id="cf_p" type="number" step="0.01" inputmode="decimal" value="${cfg.preco}"></div><div style="flex:1"><label class="lbl" style="margin-top:0">Vencimento (dia)</label><input class="in sm" id="cf_d" type="number" min="1" max="28" value="${cfg.dia_vencimento}"></div></div>
+  ${cfg.infinitepay_handle?`<p class="mut tiny mt8"><b style="color:var(--ok)">Pagamento pelo app ativo.</b></p>`:''}
+  <button class="btn sm mt12" style="width:100%" onclick="salvarCfg()">Salvar</button><p class="mut tiny mt8">O valor padrão vale para quem não tem valor próprio, a partir das próximas mensalidades. Valores com desconto se definem na ficha de cada aluno (Gestão → Alunos).</p></div>`}
 function confirmar(b){if(b.dataset.c){return true}b.dataset.c=1;b.textContent='Desfazer?';b.className='badge b-warn';setTimeout(()=>{if(b.isConnected){delete b.dataset.c;b.textContent='Pago';b.className='badge b-ok'}},3000);return false}
 function salvarCfg(){const p=parseFloat($('#cf_p').value),d=parseInt($('#cf_d').value);if(!(p>=0)||!(d>=1&&d<=28)){toast('Confira valor e dia (1 a 28)',true);return}
-  const tag=($('#cf_tag').value||'').trim().replace(/^[$@]/,'').toLowerCase();if(tag&&!/^[a-z0-9_.-]{2,40}$/.test(tag)){toast('InfiniteTag inválida. Use só letras, números, _ ou .',true);return}
+  const tag=(($('#cf_tag')||{}).value||(S.D.cfg||{}).infinitepay_handle||'').trim().replace(/^[$@]/,'').toLowerCase();if(tag&&!/^[a-z0-9_.-]{2,40}$/.test(tag)){toast('InfiniteTag inválida. Use só letras, números, _ ou .',true);return}
   act(async()=>{await q(sb.from('config').update({preco:p,dia_vencimento:d,infinitepay_handle:tag||null}).eq('modalidade',S.mod));await loadData();render(true);toast('Configuração salva')})}
 function gEquipe(){const D=S.D;const eq=D.equipe||[];const aux=eq.filter(e=>e.papel==='aux');const conv=(D.convites||[]).filter(c=>c.papel==='aux');
   return `<div class="h1 mt8">Equipe</div>
