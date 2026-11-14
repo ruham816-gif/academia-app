@@ -146,7 +146,9 @@ async function loadData(){const m=S.mod,D={};const mi=mesIni(),prox=addMes(mi,1)
   const L=[
     q(sb.from('avisos').select('*').eq('modalidade',m).order('criado_em',{ascending:false}).limit(30)).then(r=>D.avisos=r||[]),
     q(sb.from('feed').select('*').eq('modalidade',m).order('criado_em',{ascending:false}).limit(1)).then(async r=>{D.feed=(r||[])[0]||null;
-      if(D.feed){try{const s=await sb.storage.from('feed').createSignedUrl(D.feed.foto_path,60*60*6);D.feed.url=s.data&&s.data.signedUrl}catch(e){}}}),
+      if(D.feed){let c=null;try{c=JSON.parse(LS.get('fotoUrl')||'null')}catch(e){}
+        if(c&&c.path===D.feed.foto_path&&c.exp>Date.now())D.feed.url=c.url;
+        else{try{const s=await sb.storage.from('feed').createSignedUrl(D.feed.foto_path,60*60*24);D.feed.url=s.data&&s.data.signedUrl;if(D.feed.url)LS.set('fotoUrl',JSON.stringify({path:D.feed.foto_path,url:D.feed.url,exp:Date.now()+20*3600e3}))}catch(e){}}}}),
     q(sb.rpc('ranking_mes',{p_mod:m,p_mes:mi})).then(r=>D.rank=r||[]),
     q(sb.rpc('ranking_mes',{p_mod:m,p_mes:ant})).then(r=>D.rankAnt=r||[])
   ];
@@ -192,9 +194,16 @@ const bdot=(mod,f)=>`<i class="bdot" style="background:${(BELTS[mod][f]||BELTS[m
 const payBadge=p=>({pago:'<span class="badge b-ok">Em dia</span>',pendente:'<span class="badge b-warn">Pendente</span>',atrasado:'<span class="badge b-bad">Atrasado</span>'})[p];
 function phArt(){return `<svg class="ph" viewBox="0 0 400 320" preserveAspectRatio="xMidYMid slice"><defs><radialGradient id="pg" cx="72%" cy="12%" r="95%"><stop offset="0" style="stop-color:var(--acc);stop-opacity:.75"/><stop offset=".55" stop-color="#1a1012"/><stop offset="1" stop-color="#0b0b0e"/></radialGradient></defs><rect width="400" height="320" fill="url(#pg)"/><g stroke="rgba(255,255,255,.09)" stroke-width="1">${[0,1,2,3,4,5,6].map(i=>{const y=190+i*i*4+i*8;return `<line x1="0" y1="${y}" x2="400" y2="${y}"/>`}).join('')}${[-6,-4,-2,0,2,4,6].map(k=>`<line x1="${200+k*12}" y1="186" x2="${200+k*95}" y2="320"/>`).join('')}</g></svg><img class="ph-logo" src="${MODS[S.mod].logo}" alt="">`}
 function feedCard(f){if(!f)return `<div class="feed">${phArt()}<div class="ov"><p class="cap">A foto do próximo treino aparece aqui</p><small>Os professores publicam pelo app</small></div></div>`;
-  return `<div class="feed">${f.url?`<img class="ph-photo" src="${esc(f.url)}" alt="Foto do último treino">`:phArt()}<span class="tag live top"><i class="dot"></i>Último treino</span><div class="ov"><p class="cap">${esc(f.legenda||'Treino')}</p><small>${esc(f.autor_nome||'')} • ${quando(f.criado_em)}</small></div></div>`}
+  return `<div class="feed">${f.url?`<img class="ph-photo" src="${esc(f.url)}" alt="Foto do último treino">`:phArt()}<span class="tag live top"><i class="dot"></i>Último treino</span>${f.url?`<button class="dl" onclick="baixarFoto()" aria-label="Baixar foto">${ic('download')}Baixar</button>`:''}<div class="ov"><p class="cap">${esc(f.legenda||'Treino')}</p><small>${esc(f.autor_nome||'')} • ${quando(f.criado_em)}</small></div></div>`}
 function kingCard(t,n,info){return `<div class="king"><span class="lab">Rei do Tatame</span><b class="kt">${t}</b><div class="kav">${crown()}${initials(n)}</div><p class="kn">${esc(n)}</p><small class="mut">${info}</small></div>`}
 function kingVazio(t){return `<div class="king" style="opacity:.6"><span class="lab">Rei do Tatame</span><b class="kt">${t}</b><div class="kav">${crown()}?</div><p class="kn">A definir</p><small class="mut">sem dados ainda</small></div>`}
+let fotoBlob=null;
+async function baixarFoto(){const f=S.D.feed;if(!f||!f.url)return;const nome=('treino-'+MODS[S.mod].nome+'-'+iso(new Date(f.criado_em))+'.jpg').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  try{if(!fotoBlob||fotoBlob.path!==f.foto_path){busy(true);try{const r=await fetch(f.url);if(!r.ok)throw new Error('http');fotoBlob={path:f.foto_path,blob:await r.blob()}}finally{busy(false)}}
+    const file=new File([fotoBlob.blob],nome,{type:'image/jpeg'});
+    if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:'Foto do treino'});return}catch(e){if(e.name==='AbortError')return;if(e.name==='NotAllowedError'){toast('Foto pronta! Toque em Baixar de novo.');return}}}
+    const u=URL.createObjectURL(fotoBlob.blob);const a=document.createElement('a');a.href=u;a.download=nome;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),5000);toast('Foto baixada')}
+  catch(e){console.error(e);toast('Não consegui baixar a foto. Tente de novo.',true)}}
 const backBar=(t)=>`<button class="back" onclick="go({sub:null})">${ic('back')}${t}</button>`;
 const autor=()=>(S.role==='resp'?'Prof. ':'')+S.pname;
 
@@ -459,17 +468,19 @@ function pPublicar(){const D=S.D;const img=S.newImg;
   <label class="btn ghost mt12">${ic('camera')}${img?'Trocar foto':'Escolher foto'}<input type="file" accept="image/*" hidden onchange="lerFoto(this)"></label>
   <label class="lbl">Legenda</label><input class="in" id="leg" value="${esc(S.legDraft)}" placeholder="Ex.: Treino de quedas — ${dataExt(hoje()).split(',')[0].toLowerCase()}">
   <button class="btn mt12" onclick="publicarFoto()">Publicar no feed</button>
-  <div class="info">${ic('info')}<span>A nova foto substitui a anterior na tela inicial dos alunos. Só alunos e professores da modalidade conseguem ver.</span></div>
+  <div class="info">${ic('info')}<span>A nova foto substitui a anterior, e a antiga é apagada automaticamente para não ocupar espaço. Só alunos e professores da modalidade conseguem ver e baixar.</span></div>
   <div class="sec-t">Avisos</div>
   <textarea class="in" id="avtxt" placeholder="Ex.: Não haverá treino no feriado."></textarea>
   <button class="btn mt8" onclick="publicarAviso()">${ic('bell')}Publicar aviso</button>
   <div class="mt12">${D.avisos.map(v=>`<div class="aviso">${ic('bell')}<div><p>${esc(v.texto)}</p><small>${esc(v.autor_nome||'')} • ${quando(v.criado_em)}</small></div><button class="x" onclick="apagarAviso(${v.id})" aria-label="Apagar">${ic('x')}</button></div>`).join('')}</div>`}
 function lerFoto(inp){const f=inp.files&&inp.files[0];if(!f)return;S.legDraft=$('#leg').value;const r=new FileReader();
-  r.onload=e=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1600/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
-    c.toBlob(b=>{S.newBlob=b;S.newImg=URL.createObjectURL(b);render(true)},'image/jpeg',.85)};im.onerror=()=>toast('Não consegui abrir essa imagem',true);im.src=e.target.result};r.readAsDataURL(f)}
+  r.onload=e=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+    c.toBlob(b=>{S.newBlob=b;S.newImg=URL.createObjectURL(b);render(true)},'image/jpeg',.8)};im.onerror=()=>toast('Não consegui abrir essa imagem',true);im.src=e.target.result};r.readAsDataURL(f)}
 function publicarFoto(){if(!S.newBlob){toast('Escolha uma foto primeiro',true);return}const leg=$('#leg').value.trim()||'Treino de hoje';
   act(async()=>{const path=`${S.mod}/${Date.now()}.jpg`;await q(sb.storage.from('feed').upload(path,S.newBlob,{contentType:'image/jpeg',upsert:false}));
-    await q(sb.from('feed').insert({modalidade:S.mod,foto_path:path,legenda:leg,autor_nome:autor()}));S.newImg=null;S.newBlob=null;S.legDraft='';await loadData();render(true);toast('Foto publicada no feed')})}
+    await q(sb.from('feed').insert({modalidade:S.mod,foto_path:path,legenda:leg,autor_nome:autor()}));await apagarFotosAntigas(path);S.newImg=null;S.newBlob=null;S.legDraft='';await loadData();render(true);toast('Foto publicada no feed')})}
+async function apagarFotosAntigas(manter){try{const r=await sb.from('feed').select('id,foto_path').eq('modalidade',S.mod).neq('foto_path',manter);const old=r.data||[];if(!old.length)return;
+  await sb.storage.from('feed').remove(old.map(o=>o.foto_path));await sb.from('feed').delete().in('id',old.map(o=>o.id))}catch(e){console.error('limpeza de fotos',e)}}
 function publicarAviso(){const t=$('#avtxt').value.trim();if(!t){toast('Escreva o aviso',true);return}act(async()=>{await q(sb.from('avisos').insert({modalidade:S.mod,texto:t,autor_nome:autor()}));await loadData();render(true);toast('Aviso publicado')})}
 function apagarAviso(id){act(async()=>{await q(sb.from('avisos').delete().eq('id',id));await loadData();render(true);toast('Aviso removido')})}
 function pComps(){const D=S.D;const pend=(D.comps||[]).filter(c=>c.status==='pendente'),ok=(D.comps||[]).filter(c=>c.status==='confirmado'&&c.data>=D.mi);

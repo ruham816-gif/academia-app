@@ -226,3 +226,5 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:16px 0}
 .in.sm{padding:10px 12px;font-size:14px}
 .warnbox{display:flex;gap:10px;align-items:flex-start;padding:14px;border-radius:16px;background:rgba(245,180,0,.1);border:1px solid rgba(245,180,0,.35);margin-bottom:12px;font-size:14px;width:100%;text-align:left}
 .warnbox svg{color:var(--warn)}
+.feed .dl{position:absolute;top:12px;right:12px;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:99px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;font:700 12px Inter;z-index:2}
+.feed .dl svg{width:16px;height:16px}
