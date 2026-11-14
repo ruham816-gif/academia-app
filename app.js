@@ -123,6 +123,7 @@ async function boot(){
   if(S.sess)await entrarNoApp();else{S.scr=S.mod?'entrada':'escolha';render()}
 }
 async function entrarNoApp(){S.scr='carregando';render();
+  if(S.sess&&S.sess.user&&(S.sess.user.user_metadata||{}).trocar_senha){S.forcarSenha=true;S.scr='novasenha';render();return}
   try{await loadCtx();
     if(!S.mod){const c=contextos();S.mod=c[0]?c[0].mod:null}
     if(!S.mod){S.scr='escolha';render();return}
@@ -256,11 +257,12 @@ function entrar(){const e=$('#l_email').value.trim(),s=$('#l_senha').value;if(!e
 function esqueci(){const e=($('#l_email')||{}).value;openSheet(`<h3>Recuperar senha</h3><p class="mut">Enviaremos um link para criar uma nova senha.</p>
   <label class="lbl">E-mail</label><input class="in" id="r_email" type="email" value="${esc(e||'')}"><button class="btn mt16" onclick="enviarReset()">Enviar link</button>`)}
 function enviarReset(){const e=$('#r_email').value.trim();if(!e)return;act(async()=>{await q(sb.auth.resetPasswordForEmail(e,{redirectTo:location.origin+location.pathname}));closeSheet();toast('Link enviado! Veja seu e-mail.')})}
-function vNovaSenha(){return `<div class="wrap fade" style="padding-top:calc(30px + env(safe-area-inset-top))"><div class="h1">Nova senha</div>
+function vNovaSenha(){return `<div class="wrap fade" style="padding-top:calc(30px + env(safe-area-inset-top))"><div class="h1">${S.forcarSenha?'Crie sua senha':'Nova senha'}</div>
+  ${S.forcarSenha?`<p class="mut mt8">Você entrou com uma senha temporária enviada pelo professor. Crie agora uma senha só sua.</p>`:''}
   <label class="lbl">Digite a nova senha</label><input class="in" id="n_s1" type="password" autocomplete="new-password"><label class="lbl">Repita a senha</label><input class="in" id="n_s2" type="password" autocomplete="new-password">
-  <button class="btn mt16" onclick="salvarSenha()">Salvar nova senha</button></div>`}
+  <button class="btn mt16" onclick="salvarSenha()">Salvar nova senha</button>${S.forcarSenha?`<div style="text-align:center" class="mt12"><button class="link" onclick="sair()">Sair</button></div>`:''}</div>`}
 function salvarSenha(){const a=$('#n_s1').value,b=$('#n_s2').value;if(a.length<6){toast('A senha precisa ter pelo menos 6 caracteres',true);return}if(a!==b){toast('As senhas não são iguais',true);return}
-  act(async()=>{await q(sb.auth.updateUser({password:a}));toast('Senha alterada!');history.replaceState(null,'',location.pathname);await entrarNoApp()})}
+  act(async()=>{const r=await q(sb.auth.updateUser({password:a,data:{trocar_senha:false}}));if(r&&r.user&&S.sess)S.sess.user=r.user;S.forcarSenha=false;toast('Senha alterada!');history.replaceState(null,'',location.pathname);await entrarNoApp()})}
 function vCadastro(){const c=S.cad;return `<div class="wrap fade" style="padding-top:calc(20px + env(safe-area-inset-top))">
   <button class="back" onclick="go({scr:S.sess?'semvinculo':'entrada'})">${ic('back')}Voltar</button>
   <div class="h1">Criar conta</div><p class="mut mt8">Use os dados de quem vai usar o app. Para aluno menor de idade, normalmente é o responsável.</p>
@@ -583,6 +585,7 @@ function alunoSheet(id){const a=(S.D.alunos||[]).find(x=>x.id===id),jj=S.mod==='
   ${a.resp_nome?`<div class="radio"><button class="${a.acesso==='responsavel'?'on':''}" onclick="setCampo('${a.id}',{acesso:'responsavel'})">Responsável<br><small>${esc(first(a.resp_nome))}</small></button><button class="${a.acesso==='aluno'?'on':''}" onclick="setCampo('${a.id}',{acesso:'aluno'})">Próprio aluno<br><small>${esc(first(a.nome))}</small></button></div>`:''}
   <label class="lbl">E-mail de quem usa o app ${a.user_id?'<span class="badge b-ok">conta ligada</span>':'<span class="badge b-mut">sem conta</span>'}</label>
   <div class="gap8"><input class="in sm" id="g_em" type="email" value="${esc(a.email_acesso||'')}"><button class="btn sm" onclick="setCampo('${a.id}',{email_acesso:$('#g_em').value.trim()||null})">Salvar</button></div>
+  ${a.user_id?`<button class="btn sm ghost mt8" style="width:100%" onclick="gerarSenha('${a.id}',this)">${ic('shield')}Gerar nova senha</button><p class="mut tiny mt8">Use quando o aluno esquecer a senha. Você recebe uma senha temporária para enviar pelo WhatsApp.</p>`:''}
   <hr class="sep"><b>Valor da mensalidade</b>
   <div class="gap8 mt8"><div class="search" style="flex:1"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mut);font-weight:700">R$</span><input class="in sm" id="v_val" style="padding-left:38px" type="number" step="0.01" min="0" inputmode="decimal" placeholder="${precoPadrao().toFixed(2).replace('.',',')} (padrão)" value="${valorDe(a.id)?Number(valorDe(a.id).valor):''}"></div><button class="btn sm" onclick="salvarValor('${a.id}')">Salvar</button></div>
   <input class="in sm mt8" id="v_obs" placeholder="Motivo do desconto (opcional)" value="${esc((valorDe(a.id)||{}).obs||'')}">
@@ -593,6 +596,21 @@ function alunoSheet(id){const a=(S.D.alunos||[]).find(x=>x.id===id),jj=S.mod==='
   <hr class="sep"><div class="row" style="justify-content:space-between"><b>Frequência</b><span>${nPres} treino${nPres!==1?'s':''} em ${nomeMes(D.mi).toLowerCase()}</span></div>
   <div class="row mt12" style="justify-content:space-between"><b>Contrato</b>${contratoOk(a,D.cfg)?'<span class="badge b-ok">Aceito</span>':'<span class="badge b-warn">Pendente</span>'}</div>
   ${a.status==='ativo'?`<button class="btn danger mt16" onclick="setCampo('${a.id}',{status:'inativo'},true)">Inativar aluno</button>`:`<button class="btn ok mt16" onclick="setCampo('${a.id}',{status:'ativo'},true)">Reativar aluno</button>`}`)}
+function gerarSenha(id,btn){if(!btn.dataset.c){btn.dataset.c=1;btn.innerHTML=ic('alert')+'Toque de novo para confirmar';setTimeout(()=>{if(btn.isConnected){delete btn.dataset.c;btn.innerHTML=ic('shield')+'Gerar nova senha'}},4000);return}
+  const a=(S.D.alunos||[]).find(x=>x.id===id);
+  act(async()=>{const r=await sb.functions.invoke('senha',{body:{aluno_id:id}});
+    if(r.error){let msg=r.error.message;try{const b=await r.error.context.json();msg=b.erro||msg}catch(e){}throw new Error(msg)}
+    const d=r.data||{};if(!d.senha)throw new Error(d.erro||'Não foi possível gerar a senha.');
+    const quem=a.acesso==='responsavel'&&a.resp_nome?a.resp_nome:a.nome;
+    const msg=`Olá, ${first(quem)}! Sua senha temporária do app da academia é: ${d.senha}\nEntre com o e-mail ${d.email} e o app vai pedir para você criar uma senha nova.\n${location.origin+location.pathname}`;
+    const tel=String((a.acesso==='responsavel'&&a.resp_telefone)||a.telefone||a.resp_telefone||'').replace(/\D/g,'');const fone=tel.length===10||tel.length===11?'55'+tel:tel;
+    S.msgSenha=msg;
+    openSheet(`<h3>Senha temporária</h3><p class="mut">${esc(a.nome)} • ${esc(d.email||'')}</p>
+      <div class="card mt12" style="text-align:center"><small class="mut">Nova senha</small><div style="font:700 34px ui-monospace,Menlo,Consolas,monospace;letter-spacing:4px;margin-top:6px">${esc(d.senha)}</div><small class="mut">tudo em letras minúsculas</small></div>
+      <p class="mut tiny mt8">No primeiro acesso com essa senha, o app pede para o aluno criar uma senha nova.</p>
+      <a class="btn ok mt12" style="text-decoration:none" href="https://wa.me/${fone}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">${ic('chat')}Enviar pelo WhatsApp</a>
+      <button class="btn ghost mt8" onclick="copiarMsgSenha()">${ic('file')}Copiar mensagem</button>`)})}
+function copiarMsgSenha(){try{navigator.clipboard.writeText(S.msgSenha||'').then(()=>toast('Mensagem copiada'),()=>toast('Não deu para copiar aqui',true))}catch(e){toast('Não deu para copiar aqui',true)}}
 function salvarValor(id){const t=$('#v_val').value.trim().replace(',','.');const obs=$('#v_obs').value.trim()||null;const v=t===''?null:parseFloat(t);
   if(t!==''&&!(v>=0)){toast('Valor inválido',true);return}
   act(async()=>{if(v===null)await q(sb.from('valores_alunos').delete().eq('aluno_id',id));
