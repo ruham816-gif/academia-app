@@ -186,7 +186,10 @@ async function loadData(){const m=S.mod,D={};const mi=mesIni(),prox=addMes(mi,1)
       q(sb.from('convites_staff').select('*').eq('modalidade',m)).then(r=>D.convites=r||[]),
       (async()=>{await q(sb.rpc('gerar_mensalidades',{p_mod:m,p_comp:mi}));D.mens=await q(sb.from('mensalidades').select('*').eq('modalidade',m).eq('competencia',mi))||[]})());
   }
-  await Promise.all(L);S.D=D}
+  await Promise.all(L);
+  // aluno inativo não conta na mensalidade: só fica o que ele já pagou (dinheiro recebido)
+  if(S.role==='resp'&&D.mens&&D.alunos){const at=new Set(D.alunos.filter(a=>a.status==='ativo').map(a=>a.id));D.mens=D.mens.filter(x=>x.status==='pago'||at.has(x.aluno_id))}
+  S.D=D}
 
 /* ---------- regras ---------- */
 function ordComp(rows){return rows.filter(s=>s.comps>0).sort((x,y)=>y.pts-x.pts||y.ouros-x.ouros||y.comps-x.comps||y.freq-x.freq)}
