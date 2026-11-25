@@ -9,6 +9,8 @@ home:'<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>
 calendar:'<rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/>',
 trophy:'<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
 card:'<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20M6 15h4"/>',
+copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
 user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
 check:'<path d="M20 6 9 17l-5-5"/>',
 camera:'<path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="4"/>',
@@ -74,7 +76,7 @@ const MODS={
   jj:{nome:'Jiu-Jitsu',prof:'Renan Pinheiro',logo:'img/jj_logo.webp'}
 };
 const BELTS={
-  judo:[['Branca','#f2f2f2'],['Cinza','#8d8f94'],['Azul','#1f5fd6'],['Amarela','#f3c623'],['Laranja','#ff8a1f'],['Verde','#2f9e4f'],['Roxa','#7b3fb5'],['Marrom','#6b4226'],['Preta','#141414']],
+  judo:[['Branca','#f2f2f2'],['Branca ponta cinza','#f2f2f2','#8d8f94'],['Cinza','#8d8f94'],['Cinza ponta azul','#8d8f94','#1f5fd6'],['Azul','#1f5fd6'],['Azul ponta amarela','#1f5fd6','#f3c623'],['Amarela','#f3c623'],['Amarela ponta laranja','#f3c623','#ff8a1f'],['Laranja','#ff8a1f'],['Verde','#2f9e4f'],['Roxa','#7b3fb5'],['Marrom','#6b4226'],['Preta','#141414']],
   jj:[['Branca','#f2f2f2'],['Cinza','#8d8f94'],['Amarela','#f3c623'],['Laranja','#ff8a1f'],['Verde','#2f9e4f'],['Azul','#1f5fd6'],['Roxa','#7b3fb5'],['Marrom','#6b4226'],['Preta','#141414']]
 };
 const COL={1:['Ouro','m1','1º'],2:['Prata','m2','2º'],3:['Bronze','m3','3º'],0:['Participação','m0','P']};
@@ -97,7 +99,7 @@ const uid=()=>S.sess&&S.sess.user.id;
 const RET=(()=>{try{const u=new URL(location.href);if(u.searchParams.get('pagamento')==='retorno'){const g=k=>u.searchParams.get(k);
   const o={order_nsu:g('order_nsu'),transaction_nsu:g('transaction_nsu'),slug:g('slug'),receipt_url:g('receipt_url'),capture_method:g('capture_method')};history.replaceState(null,'',u.pathname);return o}}catch(e){}return null})();
 
-const ABRIR=(()=>{const h=location.hash.replace('#','');if(h==='mensalidade'){history.replaceState(null,'',location.pathname+location.search);return h}return null})();
+const ABRIR=(()=>{const h=location.hash.replace('#','');if(h==='mensalidade'||h==='financeiro'){history.replaceState(null,'',location.pathname+location.search);return h}return null})();
 
 /* ---------- estado ---------- */
 let S={mod:LS.get('mod'),scr:'boot',sess:null,ctx:null,role:null,aluno:null,pname:'',tab:null,sub:null,rk:'comp',mat:null,D:{},ch:null,chData:null,newImg:null,newBlob:null,legDraft:'',cad:{}};
@@ -138,7 +140,9 @@ function contextos(){const c=S.ctx;if(!c)return [];const l=[];
   return l}
 async function decide(){const c=S.ctx;LS.set('mod',S.mod);S.sub=null;S.ch=null;S.newImg=null;
   const pp=c.papeis.find(x=>x.modalidade===S.mod);
-  if(pp){S.role=pp.papel;S.pname=pp.nome||c.perfil.nome||'Professor';S.aluno=null;if(!STAFF_TABS.includes(S.tab)||(S.tab==='gestao'&&S.role!=='resp'))S.tab='painel'}
+  if(pp){S.role=pp.papel;S.pname=pp.nome||c.perfil.nome||'Professor';S.aluno=null;if(!STAFF_TABS.includes(S.tab)||(S.tab==='gestao'&&S.role!=='resp'))S.tab='painel';
+    if(ABRIR==='financeiro'&&S.role==='resp'&&!S.abriu){S.tab='gestao';S.sub='fin';S.abriu=true}
+    sincronizarNotif()}
   else{const al=c.alunos.filter(x=>x.modalidade===S.mod&&x.status==='ativo');
     if(!al.length){S.role=null;S.scr=c.alunos.some(x=>x.modalidade===S.mod&&x.status==='pendente')?'aguardando':'semvinculo';render();return}
     S.role='aluno';const pref=LS.get('aluno_'+S.mod);S.aluno=al.find(x=>x.id===pref)||al[0];if(STAFF_TABS.includes(S.tab)||!S.tab)S.tab='inicio';
@@ -165,12 +169,16 @@ async function loadData(){const m=S.mod,D={};const mi=mesIni(),prox=addMes(mi,1)
       q(sb.from('competicoes').select('*').eq('aluno_id',a).order('data',{ascending:false})).then(r=>D.comps=r||[]),
       q(sb.from('mensalidades').select('*').eq('aluno_id',a).order('competencia',{ascending:false}).limit(12)).then(r=>D.mens=r||[]),
       q(sb.from('graduacoes').select('*').eq('aluno_id',a).order('data',{ascending:true}).order('id',{ascending:true})).then(r=>D.grads=r||[]),
-      qs(sb.rpc('config_aluno',{p_mod:m}),async()=>[await qs(sb.from('config').select('*').eq('modalidade',m).maybeSingle(),null)]).then(r=>D.cfg=(r||[])[0]||null));
+      qs(sb.rpc('config_aluno',{p_mod:m}),async()=>[await qs(sb.from('config').select('*').eq('modalidade',m).maybeSingle(),null)]).then(r=>D.cfg=(r||[])[0]||null),
+      qs(sb.rpc('dados_pix',{p_mod:m}),[]).then(r=>D.pix=(r||[])[0]||null),
+      qs(sb.from('checkins').select('*').eq('aluno_id',a).eq('data',hoje()).maybeSingle(),null).then(r=>D.ck=r),
+      qs(sb.rpc('checkins_hoje',{p_mod:m}),0).then(r=>D.ckN=r||0));
   }else{
     L.push(
       q(sb.from('alunos').select('*').eq('modalidade',m).order('nome')).then(r=>D.alunos=r||[]),
       q(sb.from('presencas').select('aluno_id,data').eq('modalidade',m).gte('data',mi).lt('data',prox)).then(r=>D.pres=r||[]),
-      q(sb.from('competicoes').select('*').eq('modalidade',m).or(`status.eq.pendente,data.gte.${mi}`).order('data',{ascending:false})).then(r=>D.comps=r||[]));
+      q(sb.from('competicoes').select('*').eq('modalidade',m).or(`status.eq.pendente,data.gte.${mi}`).order('data',{ascending:false})).then(r=>D.comps=r||[]),
+      qs(sb.from('checkins').select('aluno_id,data,vai').eq('modalidade',m).gte('data',mi),[]).then(r=>D.ck=r||[]));
     if(S.role==='resp')L.push(
       q(sb.from('config').select('*').eq('modalidade',m).maybeSingle()).then(r=>D.cfg=r),
       q(sb.from('papeis').select('*').eq('modalidade',m)).then(r=>D.equipe=r||[]),
@@ -192,12 +200,13 @@ function statusMens(row,cfg){const dia=cfg?cfg.dia_vencimento:10;if(row&&row.sta
 const contratoOk=(a,cfg)=>!!(a&&a.contrato_aceito_em&&cfg&&a.contrato_versao===cfg.contrato_versao);
 
 /* ---------- peças visuais ---------- */
-function belt(mod,f,g,w=220){const [n,c]=BELTS[mod][f]||BELTS[mod][0];const tip=mod==='jj';const tc=n==='Preta'?'#c62828':'#111';
+function belt(mod,f,g,w=220){const [n,c,ponta]=BELTS[mod][f]||BELTS[mod][0];const tip=mod==='jj';const tc=n==='Preta'?'#c62828':'#111';
   let s=`<svg class="belt" viewBox="0 0 200 24" width="${w}" height="${Math.round(w*.12)}"><rect x="1" y="2" width="198" height="20" rx="3" fill="${c}" stroke="rgba(255,255,255,.2)"/><rect x="1" y="5" width="198" height="1.4" fill="rgba(255,255,255,.14)"/><rect x="1" y="18" width="198" height="1.4" fill="rgba(0,0,0,.2)"/>`;
   if(tip){s+=`<rect x="140" y="2" width="44" height="20" fill="${tc}"/>`;for(let i=0;i<g;i++)s+=`<rect x="${174-i*8}" y="2" width="4" height="20" fill="#fff"/>`}
+  if(ponta)s+=`<rect x="1" y="2" width="34" height="20" rx="3" fill="${ponta}"/><rect x="31" y="2" width="4" height="20" fill="${ponta}"/><rect x="165" y="2" width="34" height="20" rx="3" fill="${ponta}"/><rect x="165" y="2" width="4" height="20" fill="${ponta}"/><rect x="1" y="2" width="198" height="20" rx="3" fill="none" stroke="rgba(255,255,255,.2)"/>`;
   return s+'</svg>'}
 const faixaNome=(mod,f,g)=>(BELTS[mod][f]||BELTS[mod][0])[0]+(mod==='jj'&&g?` • ${g}º grau`:'');
-const bdot=(mod,f)=>`<i class="bdot" style="background:${(BELTS[mod][f]||BELTS[mod][0])[1]}"></i>`;
+const bdot=(mod,f)=>{const b=BELTS[mod][f]||BELTS[mod][0];return `<i class="bdot" style="background:${b[2]?`linear-gradient(90deg,${b[1]} 55%,${b[2]} 55%)`:b[1]}"></i>`};
 const payBadge=p=>({pago:'<span class="badge b-ok">Em dia</span>',pendente:'<span class="badge b-warn">Pendente</span>',atrasado:'<span class="badge b-bad">Atrasado</span>'})[p];
 function phArt(){return `<svg class="ph" viewBox="0 0 400 320" preserveAspectRatio="xMidYMid slice"><defs><radialGradient id="pg" cx="72%" cy="12%" r="95%"><stop offset="0" style="stop-color:var(--acc);stop-opacity:.75"/><stop offset=".55" stop-color="#1a1012"/><stop offset="1" stop-color="#0b0b0e"/></radialGradient></defs><rect width="400" height="320" fill="url(#pg)"/><g stroke="rgba(255,255,255,.09)" stroke-width="1">${[0,1,2,3,4,5,6].map(i=>{const y=190+i*i*4+i*8;return `<line x1="0" y1="${y}" x2="400" y2="${y}"/>`}).join('')}${[-6,-4,-2,0,2,4,6].map(k=>`<line x1="${200+k*12}" y1="186" x2="${200+k*95}" y2="320"/>`).join('')}</g></svg><img class="ph-logo" src="${MODS[S.mod].logo}" alt="">`}
 function feedCard(f){if(!f)return `<div class="feed">${phArt()}<div class="ov"><p class="cap">A foto do próximo treino aparece aqui</p><small>Os professores publicam pelo app</small></div></div>`;
@@ -368,7 +377,7 @@ async function sincronizarNotif(){try{if(notifEstado()==='on')await inscreverPus
 async function removerNotif(){try{if(!pushOk())return;const reg=await navigator.serviceWorker.getRegistration();const sub=reg&&await reg.pushManager.getSubscription();
   if(sub)await sb.rpc('remover_inscricao',{p_endpoint:sub.endpoint})}catch(e){}}
 function notifCard(){const e=notifEstado();if(e==='on'||e==='sem-suporte')return '';
-  const txt={off:'Ative para receber um aviso quando a mensalidade estiver vencendo ou atrasada.',instalar:'No iPhone, as notificações funcionam com o app instalado: toque em Compartilhar → "Adicionar à Tela de Início" e abra o app pelo ícone.',bloqueado:'As notificações estão bloqueadas para este app. Libere nas configurações do celular.'}[e];
+  const txt={off:S.role==='resp'?'Ative para ser avisado quando um aluno pedir o link do cartão ou informar um pagamento.':'Ative para receber um aviso quando a mensalidade estiver vencendo ou atrasada.',instalar:'No iPhone, as notificações funcionam com o app instalado: toque em Compartilhar → "Adicionar à Tela de Início" e abra o app pelo ícone.',bloqueado:'As notificações estão bloqueadas para este app. Libere nas configurações do celular.'}[e];
   return `<div class="card mt12"><div class="row">${ic('bell')}<b>Avisos no celular</b></div><p class="mut mt8" style="font-size:13px">${txt}</p>${e==='off'?`<button class="btn sm mt8" onclick="ativarNotif()">${ic('bell')}Ativar notificações</button>`:''}</div>`}
 
 /* ---------- ALUNO ---------- */
@@ -379,7 +388,9 @@ function aInicio(){const D=S.D,a=S.aluno,mi=D.mi;const rc=ordComp(rankRows(D.ran
   const mrow=(D.mens||[]).find(x=>x.competencia===mi);const st=statusMens(mrow,D.cfg);
   return `<div class="hello"><small>Bem-vindo de volta</small><h1 class="h1">Olá, ${esc(first(a.nome))}</h1></div>
   ${!contratoOk(a,D.cfg)?`<button class="warnbox" onclick="go({tab:'perfil',sub:'contrato'})">${ic('alert')}<span><b>Contrato aguardando seu aceite.</b><br>Toque para ler e aceitar.</span></button>`:''}
-  ${st!=='pago'&&online()?`<button class="warnbox" onclick="go({tab:'mensal'})">${ic('money')}<span><b>Mensalidade de ${nomeMes(mi).toLowerCase()} ${st==='atrasado'?'atrasada':'em aberto'}.</b><br>Toque para pagar por Pix ou cartão.</span></button>`:''}
+  ${checkinCard()}
+  ${mrow&&st!=='pago'&&!mrow.informado_em?`<button class="warnbox" onclick="go({tab:'mensal'})">${ic('money')}<span><b>Mensalidade de ${nomeMes(mi).toLowerCase()} ${st==='atrasado'?'atrasada':'em aberto'}.</b><br>Toque para pagar por Pix ou cartão.</span></button>`:''}
+  ${mrow&&mrow.link_pagamento&&st!=='pago'&&!mrow.informado_em?`<button class="warnbox" style="border-color:rgba(46,204,113,.4);background:rgba(46,204,113,.08)" onclick="go({tab:'mensal'})">${ic('card')}<span><b>Seu link de pagamento chegou.</b><br>Toque para pagar no cartão.</span></button>`:''}
   ${notifEstado()==='off'&&LS.get('notif_banner')!=='x'?`<div class="warnbox" style="border-color:rgba(255,255,255,.15);background:var(--card)">${ic('bell')}<span style="flex:1"><b>Receba avisos da mensalidade</b><br>Um lembrete quando estiver vencendo ou atrasada.<br><button class="btn sm mt8" onclick="ativarNotif()">Ativar</button> <button class="link" onclick="LS.set('notif_banner','x');render(true)">Agora não</button></span></div>`:''}
   ${feedCard(D.feed)}
   <div class="sec-t">Avisos ${D.avisos.length?`<span class="cnt">${D.avisos.length}</span>`:''}</div>
@@ -387,7 +398,7 @@ function aInicio(){const D=S.D,a=S.aluno,mi=D.mi;const rc=ordComp(rankRows(D.ran
   <div class="sec-t">Reis do Tatame <small class="mut">${temAnt?nomeMes(D.ant):nomeMes(mi)+' • parcial'}</small></div>
   <div class="kings">${kc?kingCard('Competição',kc.a.nome,`${kc.pts} pts • ${kc.ouros} ouro${kc.ouros!==1?'s':''}`):kingVazio('Competição')}${kf?kingCard('Frequência',kf.a.nome,kf.freq+' treinos'):kingVazio('Frequência')}</div>
   <button class="race card" onclick="go({tab:'ranking'})"><div><span class="tag live"><i class="dot"></i>Disputa de ${nomeMes(mi).toLowerCase()}</span><p>${pf>=0?`Você está em <b>${pf+1}º</b> na Frequência`:'Treine para entrar no ranking de Frequência'}${pc>=0?` e em <b>${pc+1}º</b> na Competição`:''}.</p></div>${ic('chev')}</button>
-  <div class="stats3"><div class="stat acc"><b>${presMes}</b><small>Treinos no mês</small></div><div class="stat"><b style="font-size:20px;padding-top:6px">${BELTS[S.mod][a.faixa][0]}</b><small>Faixa atual</small></div><div class="stat"><b style="font-size:20px;padding-top:6px;color:${st==='pago'?'var(--ok)':st==='pendente'?'var(--warn)':'var(--bad)'}">${st==='pago'?'Em dia':st==='pendente'?'Pendente':'Atrasada'}</b><small>Mensalidade</small></div></div>`}
+  <div class="stats3"><div class="stat acc"><b>${presMes}</b><small>Treinos no mês</small></div><div class="stat"><b style="font-size:${BELTS[S.mod][a.faixa][0].length>9?14:20}px;padding-top:6px;line-height:1.15">${BELTS[S.mod][a.faixa][0]}</b><small>Faixa atual</small></div><div class="stat"><b style="font-size:20px;padding-top:6px;color:${st==='pago'?'var(--ok)':st==='pendente'||(mrow&&mrow.informado_em)?'var(--warn)':'var(--bad)'}">${st==='pago'?'Em dia':mrow&&mrow.informado_em?'Informada':st==='pendente'?'Pendente':'Atrasada'}</b><small>Mensalidade</small></div></div>`}
 function aTreinos(){const D=S.D,mi=D.mi;const pres=D.pres||[];const y=+mi.slice(0,4),m=+mi.slice(5,7);const dias=new Date(y,m,0).getDate();const off=new Date(y,m-1,1).getDay();const h=hoje();
   let cal=['D','S','T','Q','Q','S','S'].map(w=>`<div class="wd">${w}</div>`).join('')+'<div></div>'.repeat(off);
   for(let d=1;d<=dias;d++){const ds=`${mi.slice(0,8)}${pad(d)}`;cal+=`<div class="d tr ${pres.includes(ds)?'pr':''} ${ds===h?'today':''} ${ds>h?'fut':''}">${d}</div>`}
@@ -409,16 +420,51 @@ function vRanking(){const D=S.D,k=S.rk;const list=k==='comp'?ordComp(rankRows(D.
   ${list.length?`<div class="podium">${pod}</div><div>${rows}</div>`:`<div class="empty mt16">${k==='comp'?'Nenhum resultado de competição confirmado neste mês ainda.':'Nenhuma presença registrada neste mês ainda.'}</div>`}
   <div class="card mt16 rules"><b>Como funciona</b>${k==='comp'?`<div class="pts"><div><b>3</b>Ouro</div><div><b>2</b>Prata</div><div><b>1</b>Bronze</div><div><b>1</b>Particip.</div></div><ol class="mt8"><li>Mais pontos no mês</li><li>Desempate: mais ouros</li><li>Depois: mais competições</li><li>Por último: mais treinos</li></ol><p class="mut tiny mt8">Só contam resultados confirmados pelo professor.</p>`:`<ol class="mt8"><li>Mais presenças nos treinos do mês</li><li>Desempate: mais competições no mês</li></ol>`}</div>
   ${hist?`<div class="sec-t">Campeões anteriores</div>${hist}`:''}`}
+function pagarBloco(row){const D=S.D,pix=D.pix;
+  if(row&&row.informado_em)return `<div class="info" style="border-style:solid;border-color:rgba(245,180,0,.4)">${ic('clock')}<span><b>Pagamento informado</b> (${esc(row.informado_metodo||'')}) em ${dataHora(row.informado_em)}.<br>Aguardando o professor confirmar o recebimento.</span></div>`;
+  let h='';
+  if(pix&&pix.pix_chave)h+=`<div class="card mt12"><div class="row">${ic('money')}<b>Pagar com Pix</b></div>
+    <p class="mut mt8" style="font-size:13px">Chave Pix (${/^\d{11}$/.test(pix.pix_chave)?'CPF':'chave'}): <b style="color:#fff">${esc(fmtChave(pix.pix_chave))}</b><br>Favorecido: <b style="color:#fff">${esc(pix.pix_nome||'')}</b></p>
+    ${row?`<button class="btn mt12" onclick="copiarPix(${row.id})">${ic('copy')}Copiar Pix copia e cola (${money(row.valor)})</button>`:''}
+    <button class="btn ghost sm mt8" style="width:100%" onclick="copiar('${esc(pix.pix_chave)}','Chave Pix copiada!')">Copiar só a chave</button>
+    <p class="mut tiny mt8">No app do seu banco, escolha Pix → "Pix copia e cola" e cole o código. O valor já vai preenchido.</p></div>`;
+  if(row)h+=`<div class="card mt12"><div class="row">${ic('card')}<b>Pagar com cartão de crédito</b></div>
+    ${row.link_pagamento?`<p class="mut mt8" style="font-size:13px">O professor enviou o seu link de pagamento.</p><a class="btn mt8" style="text-decoration:none" href="${esc(row.link_pagamento)}" target="_blank" rel="noopener">${ic('card')}Abrir link de pagamento</a>`
+    :row.link_solicitado_em?`<p class="mut mt8" style="font-size:13px">Link solicitado em ${dataHora(row.link_solicitado_em)}. Assim que o professor enviar, ele aparece aqui.</p>`
+    :`<p class="mut mt8" style="font-size:13px">Peça o link e o professor envia aqui no app.</p><button class="btn ghost mt8" onclick="pedirLink(${row.id})">${ic('link')}Solicitar link de pagamento</button>`}</div>`;
+  if(row)h+=`<button class="btn ok mt12" onclick="jaPaguei(${row.id})">${ic('check')}Já paguei</button>`;
+  h+=`<div class="info">${ic('info')}<span>Também é possível pagar em espécie ao professor responsável, que registra no app.</span></div>`;
+  return h}
 function aMensal(){const D=S.D,a=S.aluno,cfg=D.cfg||{dia_vencimento:10};const mi=D.mi;const row=(D.mens||[]).find(x=>x.competencia===mi);const st=statusMens(row,cfg);
   const label={pago:'Em dia',pendente:'Pendente',atrasado:'Atrasada'}[st];const hist=(D.mens||[]).filter(x=>x.competencia!==mi);
   return `<div class="hello"><small>${MODS[S.mod].nome}</small><h1 class="h1">Mensalidade</h1></div>
   <div class="paycard ${st}"><span class="st" style="color:${st==='pago'?'#4ee28a':st==='pendente'?'#ffcc3d':'#ff7a7a'}">${label}</span><div class="big">${row?money(row.valor):'—'}</div><small class="mut">${nomeMes(mi)}/${mi.slice(0,4)} • vencimento ${pad(cfg.dia_vencimento)}/${mi.slice(5,7)}</small>
   ${!row?`<p class="mut tiny mt8">O valor aparece aqui assim que o professor gerar a mensalidade do mês.</p>`:''}
   ${st==='pago'?`<p class="mt12" style="font-size:14px">Pago${row.metodo?' via <b>'+row.metodo+'</b>':''}${row.pago_em?' em '+br(row.pago_em.slice(0,10)):''}.</p>`:''}</div>
-  ${st!=='pago'&&online()?`<button class="btn mt12" onclick="pagarOnline(${row?row.id:'null'})">${ic('money')}Pagar agora — Pix ou cartão</button><p class="mut tiny mt8" style="text-align:center">Pagamento seguro pela InfinitePay. Pix sem taxa; cartão em até 12x.</p>`:''}
-  ${st!=='pago'&&!online()?`<div class="info">${ic('info')}<span>Pague diretamente ao professor responsável (Pix ou em espécie). Ele registra o pagamento aqui no app.</span></div>`:''}
-  ${st!=='pago'&&online()?`<div class="info">${ic('info')}<span>Também é possível pagar em espécie ao professor responsável, que registra no app.</span></div>`:''}
-  ${hist.length?`<div class="sec-t">Histórico</div>${hist.map(h=>`<div class="li"><div class="grow">${nomeMes(h.competencia)}/${h.competencia.slice(0,4)}<small>${h.status==='pago'?'Pago'+(h.metodo?' via '+h.metodo:'')+(h.pago_em?' em '+br(h.pago_em.slice(0,10)):''):money(h.valor)}</small></div>${h.status!=='pago'&&online()?`<button class="btn sm" onclick="pagarOnline(${h.id})">Pagar</button>`:payBadge(statusMens(h,cfg))}</div>`).join('')}`:''}`}
+  ${st!=='pago'?pagarBloco(row):''}
+  ${hist.length?`<div class="sec-t">Histórico</div>${hist.map(h=>`<div class="li"><div class="grow">${nomeMes(h.competencia)}/${h.competencia.slice(0,4)}<small>${h.status==='pago'?'Pago'+(h.metodo?' via '+h.metodo:'')+(h.pago_em?' em '+br(h.pago_em.slice(0,10)):''):money(h.valor)}</small></div>${h.status!=='pago'&&h.informado_em?'<span class="badge b-warn">Informado</span>':payBadge(statusMens(h,cfg))}</div>`).join('')}`:''}`}
+/* Pix copia e cola (BR Code do Banco Central) */
+function tlv(id,v){v=String(v);return id+String(v.length).padStart(2,'0')+v}
+function crc16(t){let c=0xFFFF;for(let i=0;i<t.length;i++){c^=t.charCodeAt(i)<<8;for(let j=0;j<8;j++){c=(c&0x8000)?((c<<1)^0x1021):(c<<1);c&=0xFFFF}}return c.toString(16).toUpperCase().padStart(4,'0')}
+const semAcento=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9 ]/g,'').trim().toUpperCase();
+function pixCopiaCola({chave,nome,cidade,valor,txid}){let p=tlv('00','01')+tlv('26',tlv('00','br.gov.bcb.pix')+tlv('01',chave));
+  p+=tlv('52','0000')+tlv('53','986')+(valor?tlv('54',Number(valor).toFixed(2)):'')+tlv('58','BR')+tlv('59',semAcento(nome).slice(0,25)||'RECEBEDOR')+tlv('60',semAcento(cidade).slice(0,15)||'BELEM');
+  p+=tlv('62',tlv('05',(String(txid||'').replace(/[^A-Za-z0-9]/g,'').slice(0,25))||'***'))+'6304';return p+crc16(p)}
+const fmtChave=k=>/^\d{11}$/.test(k)?k.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4'):/^\d{14}$/.test(k)?k.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5'):k;
+async function copiar(txt,ok){try{await navigator.clipboard.writeText(txt);toast(ok)}catch(e){const t=document.createElement('textarea');t.value=txt;document.body.appendChild(t);t.select();try{document.execCommand('copy');toast(ok)}catch(_){toast('Não deu para copiar. Segure o texto para copiar.',true)}t.remove()}}
+function copiarPix(mid){const D=S.D,m=(D.mens||[]).find(x=>x.id===mid);if(!D.pix||!D.pix.pix_chave)return;
+  copiar(pixCopiaCola({chave:D.pix.pix_chave,nome:D.pix.pix_nome,cidade:D.pix.pix_cidade,valor:m?m.valor:null,txid:m?('MEN'+m.id):''}),'Código Pix copiado! Cole no app do seu banco.')}
+function avisar(tipo,mid){try{sb.functions.invoke('notificar',{body:{acao:'aviso',tipo,mensalidade_id:mid}})}catch(e){}}
+function pedirLink(mid){act(async()=>{await q(sb.rpc('solicitar_link_cartao',{p_mensalidade:mid}));avisar('link_pedido',mid);await loadData();render(true);toast('Pedido enviado! O professor vai mandar o link aqui no app.')})}
+function jaPaguei(mid){openSheet(`<h3>Já paguei</h3><p class="mut">Avise o professor para ele confirmar o recebimento.</p>
+  <label class="lbl">Como você pagou?</label><div class="radio" id="jp_m">${['Pix','Cartão'].map((x,i)=>`<button class="${i===0?'on':''}" onclick="document.querySelectorAll('#jp_m button').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${x}</button>`).join('')}</div>
+  <button class="btn ok mt16" onclick="informarPag(${mid})">${ic('check')}Avisar o professor</button>`)}
+function informarPag(mid){const met=$('#jp_m .on').textContent;act(async()=>{await q(sb.rpc('informar_pagamento',{p_mensalidade:mid,p_metodo:met}));avisar('pago_informado',mid);closeSheet();await loadData();render(true);toast('Pronto! O professor vai confirmar o recebimento.')})}
+function fazerCheckin(vai){act(async()=>{await q(sb.rpc('fazer_checkin',{p_aluno:S.aluno.id,p_vai:vai}));await loadData();render(true);toast(vai?'Presença confirmada. Bom treino!':'Tudo bem, até a próxima!')})}
+function checkinCard(){const D=S.D,ck=D.ck,n=D.ckN||0;const dia=dataExt(hoje()).split(',')[0];
+  return `<div class="card" style="margin-bottom:12px;border-color:${ck?(ck.vai?'rgba(46,204,113,.4)':'rgba(255,255,255,.12)'):'var(--acc)'}"><div class="row" style="justify-content:space-between"><div><small class="mut">Check-in • ${esc(dia)}</small><div style="font-weight:800;font-size:16px;margin-top:2px">${ck?(ck.vai?'Você confirmou presença no treino de hoje':'Você avisou que não vai hoje'):'Você vai treinar hoje?'}</div></div>${ck&&ck.vai?`<div class="medal" style="background:var(--ok);color:#fff">${ic('check')}</div>`:''}</div>
+  <div class="gap8 mt12"><button class="btn sm ${ck&&ck.vai?'ok':ck?'ghost':''}" style="flex:1" onclick="fazerCheckin(true)">${ic('check')}Vou</button><button class="btn sm ${ck&&!ck.vai?'danger':'ghost'}" style="flex:1" onclick="fazerCheckin(false)">${ic('x')}Não vou</button></div>
+  <p class="mut tiny mt8">${n} aluno${n!==1?'s':''} confirmado${n!==1?'s':''} para hoje</p></div>`}
 const online=()=>!!(S.D.cfg&&S.D.cfg.infinitepay_handle);
 function pagarOnline(mid){act(async()=>{const r=await sb.functions.invoke('pagamento',{body:{aluno_id:S.aluno.id,mensalidade_id:mid||null}});
   if(r.error){let msg=r.error.message;try{const b=await r.error.context.json();msg=b.erro||msg}catch(e){}throw new Error(msg)}
@@ -468,13 +514,15 @@ const precoPadrao=()=>Number((S.D.cfg||{}).preco||0);
 const ativos=()=>(S.D.alunos||[]).filter(a=>a.status==='ativo');
 const nomeAluno=id=>{const a=(S.D.alunos||[]).find(x=>x.id===id);return a?a.nome:'—'};
 function pPainel(){if(S.sub==='ranking')return backBar('Painel')+vRanking();
-  const D=S.D,resp=S.role==='resp',h=hoje();const at=ativos();const presHoje=(D.pres||[]).filter(p=>p.data===h).length;const pend=(D.comps||[]).filter(c=>c.status==='pendente').length;
+  const D=S.D,resp=S.role==='resp',h=hoje();const at=ativos();const presHoje=(D.pres||[]).filter(p=>p.data===h).length;const ckVai=(D.ck||[]).filter(c=>c.data===h&&c.vai).length;
+  const pedidos=resp?(D.mens||[]).filter(x=>x.status!=='pago'&&(x.informado_em||(x.link_solicitado_em&&!x.link_pagamento))).length:0;const pend=(D.comps||[]).filter(c=>c.status==='pendente').length;
   const mats=(D.alunos||[]).filter(a=>a.status==='pendente').length;const aberto=(D.mens||[]).filter(x=>x.status!=='pago').length;
   const rc=ordComp(rankRows(D.rank)),rf=ordFreq(rankRows(D.rank));
   return `<div class="hello"><small>${dataExt(h)}</small><h1 class="h1">Olá, ${resp?'Prof. ':''}${esc(first(S.pname))}</h1></div>
-  <div class="grid2"><div class="stat acc"><b>${at.length}</b><small>Alunos ativos</small></div><div class="stat"><b>${presHoje}</b><small>Presentes hoje</small></div>
+  <div class="grid2"><div class="stat acc"><b>${at.length}</b><small>Alunos ativos</small></div><div class="stat"><b>${presHoje||ckVai}</b><small>${presHoje?'Presentes hoje':'Confirmaram presença hoje'}</small></div>
   <div class="stat"><b style="color:${pend?'var(--warn)':''}">${pend}</b><small>Resultados p/ confirmar</small></div>
   ${resp?`<div class="stat"><b style="color:${aberto?'var(--bad)':''}">${aberto}</b><small>Mensalidades em aberto</small></div>`:`<div class="stat"><b>${D.avisos.length}</b><small>Avisos ativos</small></div>`}</div>
+  ${pedidos?`<button class="li mt12" style="border-color:var(--warn)" onclick="go({tab:'gestao',sub:'fin'})">${ic('money')}<div class="grow">${pedidos} pedido${pedidos>1?'s':''} de pagamento<small>Links do cartão e pagamentos para confirmar</small></div><span class="cnt">${pedidos}</span></button>`:''}
   ${resp&&mats?`<button class="li mt12" onclick="go({tab:'gestao',sub:'mats'})">${ic('file')}<div class="grow">${mats} matrícula${mats>1?'s':''} aguardando aprovação<small>Toque para revisar</small></div><span class="cnt">${mats}</span></button>`:''}
   <div class="sec-t">Ações rápidas</div>
   <div class="grid2"><button class="tile" onclick="go({tab:'chamada'})">${ic('check')}<b>Fazer chamada</b><small>Treino de hoje</small></button><button class="tile" onclick="go({tab:'publicar'})">${ic('camera')}<b>Postar foto</b><small>Feed dos alunos</small></button>
@@ -482,15 +530,19 @@ function pPainel(){if(S.sub==='ranking')return backBar('Painel')+vRanking();
   <div class="sec-t">Líderes de ${nomeMes(D.mi).toLowerCase()} <small class="mut">parcial</small></div>
   <div class="kings">${rc[0]?kingCard('Competição',rc[0].a.nome,`${rc[0].pts} pts • ${rc[0].ouros} ouro${rc[0].ouros!==1?'s':''}`):kingVazio('Competição')}${rf[0]?kingCard('Frequência',rf[0].a.nome,rf[0].freq+' treinos'):kingVazio('Frequência')}</div>
   <button class="btn ghost mt12" onclick="go({sub:'ranking'})">${ic('trophy')}Ver rankings completos</button>
-  ${resp?'':`<div class="info">${ic('shield')}<span>Acesso de auxiliar: chamada, fotos, avisos e competições. Graduação, matrículas e valores ficam com o professor responsável.</span></div>`}
+  ${resp?notifCard():`<div class="info">${ic('shield')}<span>Acesso de auxiliar: chamada, fotos, avisos e competições. Graduação, matrículas e valores ficam com o professor responsável.</span></div>`}
   ${instalarCard()}`}
-function pChamada(){const D=S.D;const at=ativos();if(!S.chData)S.chData=hoje();const d=S.chData;
-  if(!S.ch)S.ch=new Set((D.pres||[]).filter(p=>p.data===d).map(p=>p.aluno_id));
+function pChamada(){const D=S.D;if(!S.chData)S.chData=hoje();const d=S.chData;
+  const ckd=(D.ck||[]).filter(c=>c.data===d);const ckOf=id=>ckd.find(c=>c.aluno_id===id);const vai=ckd.filter(c=>c.vai).length,nao=ckd.filter(c=>!c.vai).length;
+  const ordem=a=>{const c=ckOf(a.id);return c?(c.vai?0:2):1};const at=[...ativos()].sort((x,y)=>ordem(x)-ordem(y)||x.nome.localeCompare(y.nome));
+  const salva=(D.pres||[]).some(p=>p.data===d);
+  if(!S.ch)S.ch=salva?new Set((D.pres||[]).filter(p=>p.data===d).map(p=>p.aluno_id)):new Set(ckd.filter(c=>c.vai).map(c=>c.aluno_id));
   const nMes=id=>(D.pres||[]).filter(p=>p.aluno_id===id).length;
   return `<div class="card"><div class="ch-head"><div><small class="mut">${dataExt(d)}</small><div class="h1" style="font-size:28px;margin-top:4px">Chamada</div></div><div style="text-align:right"><div class="ch-count" id="chc">${S.ch.size}</div><small class="mut">de ${at.length}</small></div></div>
   <label class="lbl">Data do treino</label><input class="in sm" type="date" value="${d}" min="${D.mi}" max="${hoje()}" onchange="S.chData=this.value;S.ch=null;render(true)">
-  <div class="gap8 mt12"><button class="btn sm ghost" onclick="chTodos(true)">Marcar todos</button><button class="btn sm ghost" onclick="chTodos(false)">Limpar</button></div></div>
-  <div class="mt12">${at.length?at.map(a=>`<button class="rowch ${S.ch.has(a.id)?'on':''}" id="ch-${a.id}" onclick="tg('${a.id}')"><div class="av">${initials(a.nome)}</div><div class="grow">${esc(a.nome)}<small>${bdot(S.mod,a.faixa)}${faixaNome(S.mod,a.faixa,a.grau)} • ${nMes(a.id)} no mês</small></div><div class="ck">${ic('check')}</div></button>`).join(''):'<div class="empty">Nenhum aluno ativo ainda.</div>'}</div>
+  <div class="gap8 mt12"><button class="btn sm ghost" onclick="chTodos(true)">Marcar todos</button><button class="btn sm ghost" onclick="chTodos(false)">Limpar</button></div>
+  <p class="mut tiny mt12">Check-in: <b style="color:var(--ok)">${vai} vão</b> • <b style="color:#ff7a7a">${nao} não vão</b> • ${at.length-vai-nao} sem resposta${!salva&&vai?'<br>Quem confirmou já vem marcado. Ajuste no fim da aula e salve.':''}</p></div>
+  <div class="mt12">${at.length?at.map(a=>`<button class="rowch ${S.ch.has(a.id)?'on':''}" id="ch-${a.id}" onclick="tg('${a.id}')"><div class="av">${initials(a.nome)}</div><div class="grow">${esc(a.nome)}<small>${bdot(S.mod,a.faixa)}${faixaNome(S.mod,a.faixa,a.grau)} • ${nMes(a.id)} no mês${ckOf(a.id)?(ckOf(a.id).vai?' • <b style="color:var(--ok)">confirmou</b>':' • <b style="color:#ff7a7a">não vai</b>'):''}</small></div><div class="ck">${ic('check')}</div></button>`).join(''):'<div class="empty">Nenhum aluno ativo ainda.</div>'}</div>
   ${at.length?`<div class="sticky"><button class="btn" onclick="salvarChamada()">${ic('check')}Salvar chamada</button></div>`:''}`}
 function tg(id){S.ch.has(id)?S.ch.delete(id):S.ch.add(id);document.getElementById('ch-'+id).classList.toggle('on');$('#chc').textContent=S.ch.size}
 function chTodos(v){S.ch=new Set(v?ativos().map(a=>a.id):[]);render(true)}
@@ -629,16 +681,35 @@ function gFin(){const D=S.D,cfg=D.cfg||{preco:0,dia_vencimento:10};const mens=D.
   return `<div class="h1 mt8">Financeiro</div><p class="mut mt8">${nomeMes(D.mi)}/${D.mi.slice(0,4)}</p>
   <div class="sum3 mt12"><div class="stat"><b style="color:var(--ok)">${g('pago').length}</b><small>Em dia</small></div><div class="stat"><b style="color:var(--warn)">${g('pendente').length}</b><small>Pendentes</small></div><div class="stat"><b style="color:var(--bad)">${g('atrasado').length}</b><small>Atrasados</small></div></div>
   <div class="card mt12"><small class="mut">Recebido por forma de pagamento</small><div class="sum3 mt8"><div><b>${met('Cartão')}</b> <small class="mut">Cartão</small></div><div><b>${met('Pix')}</b> <small class="mut">Pix</small></div><div><b>${met('Espécie')}</b> <small class="mut">Espécie</small></div></div></div>
+  ${pedidosBloco()}
   <div class="sec-t">Alunos</div>
   ${mens.length?[...mens].sort((x,y)=>ord[statusMens(x,cfg)]-ord[statusMens(y,cfg)]||nomeAluno(x.aluno_id).localeCompare(nomeAluno(y.aluno_id))).map(m=>{const s=statusMens(m,cfg);return `<div class="li"><div class="av" style="width:34px;height:34px;font-size:11px">${initials(nomeAluno(m.aluno_id))}</div><div class="grow">${esc(nomeAluno(m.aluno_id))}<small>${m.status==='pago'?'Pago via '+(m.metodo||'—')+(m.pago_em?' em '+brCurto(m.pago_em.slice(0,10)):''):money(m.valor)+(valorDe(m.aluno_id)?' (valor próprio)':'')+' • vence '+pad(cfg.dia_vencimento)+'/'+D.mi.slice(5,7)}</small></div>${m.status==='pago'?`<button class="badge b-ok" style="border:0" onclick="if(confirmar(this))desfazerPag(${m.id})">Pago</button>`:`<button class="btn sm ok" onclick="pagSheet(${m.id})">Registrar</button>`}</div>`}).join(''):'<div class="empty">Nenhuma mensalidade neste mês (sem alunos ativos).</div>'}
   <div class="sec-t">Configuração</div>
   <div class="card"><div class="gap8"><div style="flex:1"><label class="lbl" style="margin-top:0">Valor padrão (R$)</label><input class="in sm" id="cf_p" type="number" step="0.01" inputmode="decimal" value="${cfg.preco}"></div><div style="flex:1"><label class="lbl" style="margin-top:0">Vencimento (dia)</label><input class="in sm" id="cf_d" type="number" min="1" max="28" value="${cfg.dia_vencimento}"></div></div>
+  <label class="lbl">Chave Pix (aparece para os alunos)</label><input class="in sm" id="cf_pix" autocapitalize="none" placeholder="CPF, celular, e-mail ou chave aleatória" value="${esc(cfg.pix_chave?fmtChave(cfg.pix_chave):'')}">
+  <div class="gap8"><div style="flex:2"><label class="lbl">Nome do favorecido</label><input class="in sm" id="cf_pixn" value="${esc(cfg.pix_nome||'')}"></div><div style="flex:1"><label class="lbl">Cidade</label><input class="in sm" id="cf_pixc" value="${esc(cfg.pix_cidade||'Belém')}"></div></div>
   ${cfg.infinitepay_handle?`<p class="mut tiny mt8"><b style="color:var(--ok)">Pagamento pelo app ativo.</b></p>`:''}
   <button class="btn sm mt12" style="width:100%" onclick="salvarCfg()">Salvar</button><p class="mut tiny mt8">O valor padrão vale para quem não tem valor próprio, a partir das próximas mensalidades. Valores com desconto se definem na ficha de cada aluno (Gestão → Alunos).</p></div>`}
+// chave Pix: CPF/CNPJ só números; celular no formato +55...; e-mail e chave aleatória como estão
+function normChave(v){v=String(v||'').trim();if(!v)return '';if(/@/.test(v))return v.toLowerCase();const dg=v.replace(/\D/g,'');
+  if(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v))return v.toLowerCase();
+  if(/^\+/.test(v))return '+'+dg;if(dg.length===11&&/[.\-]/.test(v))return dg;if(dg.length===14)return dg;if(dg.length===11&&dg[2]==='9'&&!/[.\-]/.test(v)&&!/^\d{3}\.?\d{3}/.test(v))return '+55'+dg;return dg.length>=11?dg:v}
+function pedidosBloco(){const D=S.D;const l=(D.mens||[]).filter(x=>x.status!=='pago'&&(x.informado_em||(x.link_solicitado_em&&!x.link_pagamento)));if(!l.length)return '';
+  return `<div class="sec-t">Pedidos <span class="cnt">${l.length}</span></div>${l.map(m=>m.informado_em
+   ?`<div class="card" style="margin-bottom:8px;border-color:rgba(245,180,0,.4)"><b>${esc(nomeAluno(m.aluno_id))}</b> informou que pagou via <b>${esc(m.informado_metodo||'')}</b><br><small class="mut">${dataHora(m.informado_em)} • ${money(m.valor)}</small>
+     <div class="gap8 mt12"><button class="btn sm ok" style="flex:1" onclick="confirmarInformado(${m.id})">${ic('check')}Recebi</button><button class="btn sm danger" style="flex:1" onclick="recusarInformado(${m.id})">Não recebi</button></div></div>`
+   :`<div class="card" style="margin-bottom:8px"><b>${esc(nomeAluno(m.aluno_id))}</b> pediu o link do cartão<br><small class="mut">${dataHora(m.link_solicitado_em)} • ${money(m.valor)}</small>
+     <input class="in sm mt12" id="lk_${m.id}" inputmode="url" autocapitalize="none" placeholder="Cole aqui o link de pagamento"><button class="btn sm mt8" style="width:100%" onclick="enviarLink(${m.id})">${ic('link')}Enviar link para o aluno</button></div>`).join('')}`}
+function enviarLink(mid){const u=($('#lk_'+mid).value||'').trim();if(!/^https?:\/\/\S+\.\S+/.test(u)){toast('Cole um link válido (começa com https://)',true);return}
+  act(async()=>{await q(sb.from('mensalidades').update({link_pagamento:u}).eq('id',mid));avisar('link_enviado',mid);await loadData();render(true);toast('Link enviado! O aluno já vê no app.')})}
+function confirmarInformado(mid){const m=S.D.mens.find(x=>x.id===mid);act(async()=>{await q(sb.from('mensalidades').update({status:'pago',metodo:m.informado_metodo||'Pix',pago_em:new Date().toISOString(),registrado_por:uid()}).eq('id',mid));avisar('pago_confirmado',mid);await loadData();render(true);toast('Pagamento confirmado')})}
+function recusarInformado(mid){act(async()=>{await q(sb.from('mensalidades').update({informado_em:null,informado_metodo:null}).eq('id',mid));avisar('pago_recusado',mid);await loadData();render(true);toast('Aviso removido. O aluno verá a mensalidade em aberto.')})}
 function confirmar(b){if(b.dataset.c){return true}b.dataset.c=1;b.textContent='Desfazer?';b.className='badge b-warn';setTimeout(()=>{if(b.isConnected){delete b.dataset.c;b.textContent='Pago';b.className='badge b-ok'}},3000);return false}
 function salvarCfg(){const p=parseFloat($('#cf_p').value),d=parseInt($('#cf_d').value);if(!(p>=0)||!(d>=1&&d<=28)){toast('Confira valor e dia (1 a 28)',true);return}
   const tag=(($('#cf_tag')||{}).value||(S.D.cfg||{}).infinitepay_handle||'').trim().replace(/^[$@]/,'').toLowerCase();if(tag&&!/^[a-z0-9_.-]{2,40}$/.test(tag)){toast('InfiniteTag inválida. Use só letras, números, _ ou .',true);return}
-  act(async()=>{await q(sb.from('config').update({preco:p,dia_vencimento:d,infinitepay_handle:tag||null}).eq('modalidade',S.mod));await loadData();render(true);toast('Configuração salva')})}
+  const px=normChave(($('#cf_pix')||{}).value||''),pxn=(($('#cf_pixn')||{}).value||'').trim(),pxc=(($('#cf_pixc')||{}).value||'').trim();
+  if(px&&!pxn){toast('Informe o nome do favorecido do Pix',true);return}
+  act(async()=>{await q(sb.from('config').update({preco:p,dia_vencimento:d,infinitepay_handle:tag||null,pix_chave:px||null,pix_nome:pxn||null,pix_cidade:pxc||null}).eq('modalidade',S.mod));await loadData();render(true);toast('Configuração salva')})}
 function gEquipe(){const D=S.D;const eq=D.equipe||[];const aux=eq.filter(e=>e.papel==='aux');const conv=(D.convites||[]).filter(c=>c.papel==='aux');
   return `<div class="h1 mt8">Equipe</div>
   ${eq.filter(e=>e.papel==='resp').map(e=>`<div class="li mt12"><div class="av" style="border:2px solid var(--acc)">${initials(e.nome)}</div><div class="grow">Prof. ${esc(e.nome||'')}<small>Responsável • acesso completo</small></div></div>`).join('')}

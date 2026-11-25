@@ -83,7 +83,6 @@ async function enviarPush(insc, mensagem, vapid) {
   });
   return r.status;
 }
-
 // ---------------------------------------------------------------------
 //  Rotina diária: avisa no celular quem tem mensalidade vencendo ou atrasada.
 //  Também envia uma notificação de teste quando o aluno ativa os avisos.
@@ -188,6 +187,47 @@ async function rodarLembretes(vapid) {
   return { ok: true, hoje, pendentes: (mens || []).length, lembretes, enviados };
 }
 
+// Avisos do pagamento: aluno -> professor responsável (pediu link / informou pagamento)
+// e professor -> aluno (link enviado / pagamento confirmado / não recebido)
+async function avisoPagamento(user, tipo, mid, vapid) {
+  if (!mid) return { ok: false };
+  const { data: m } = await admin.from('mensalidades').select('*').eq('id', mid).maybeSingle();
+  if (!m) return { ok: false };
+  const { data: a } = await admin.from('alunos').select('id,nome,user_id').eq('id', m.aluno_id).maybeSingle();
+  if (!a) return { ok: false };
+  const { data: resps } = await admin.from('papeis').select('user_id').eq('modalidade', m.modalidade).eq('papel', 'resp');
+  const ehResp = (resps || []).some(r => r.user_id === user.id);
+  const mes = MESES[Number(String(m.competencia).slice(5, 7)) - 1];
+  const mod = MODN[m.modalidade] || '';
+  const nome = String(a.nome || '').split(' ')[0];
+  let msg = null, para = [], marca = '';
+  if (tipo === 'link_pedido' && a.user_id === user.id && m.link_solicitado_em && !m.link_pagamento) {
+    msg = { titulo: 'Pedido de link do cartão', corpo: `${mod} • ${nome} pediu o link para pagar a mensalidade de ${mes} no cartão.` };
+    para = (resps || []).map(r => r.user_id); marca = m.link_solicitado_em;
+  } else if (tipo === 'pago_informado' && a.user_id === user.id && m.informado_em && m.status === 'pendente') {
+    msg = { titulo: 'Pagamento informado', corpo: `${mod} • ${nome} informou que pagou a mensalidade de ${mes} via ${m.informado_metodo || 'Pix'}. Confirme o recebimento.` };
+    para = (resps || []).map(r => r.user_id); marca = m.informado_em;
+  } else if (tipo === 'link_enviado' && ehResp && m.link_pagamento && a.user_id) {
+    msg = { titulo: 'Seu link de pagamento chegou', corpo: `${mod} • Toque para pagar a mensalidade de ${mes} no cartão.` };
+    para = [a.user_id]; marca = String(m.link_pagamento).slice(0, 80);
+  } else if (tipo === 'pago_confirmado' && ehResp && m.status === 'pago' && a.user_id) {
+    msg = { titulo: 'Pagamento confirmado', corpo: `${mod} • A mensalidade de ${mes} está paga. Obrigado!` };
+    para = [a.user_id]; marca = String(m.pago_em || '');
+  } else if (tipo === 'pago_recusado' && ehResp && m.status === 'pendente' && !m.informado_em && a.user_id) {
+    msg = { titulo: 'Pagamento não identificado', corpo: `${mod} • O professor não encontrou o pagamento de ${mes}. Toque para ver.` };
+    para = [a.user_id]; marca = new Date().toISOString().slice(0, 13);
+  }
+  if (!msg) return { ok: false };
+  let enviados = 0;
+  for (const u of [...new Set(para)]) {
+    const { error } = await admin.from('notificacoes_log').insert({ chave: `${tipo}:${mid}:${u}:${marca}`, user_id: u });
+    if (error) continue; // já avisado
+    const url = APP_URL + (para.includes(a.user_id) && u === a.user_id ? '#mensalidade' : '#financeiro');
+    enviados += await enviarPara(u, { ...msg, url, tag: `${tipo}${mid}` }, vapid);
+  }
+  return { ok: true, enviados };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ ok: true, servico: 'notificar' });
@@ -202,6 +242,11 @@ Deno.serve(async (req) => {
       if (!user) return json({ erro: 'Faça login novamente.' }, 401);
       const n = await enviarPara(user.id, { titulo: 'Notificações ativadas!', corpo: 'Você vai receber aqui os avisos de mensalidade.', url: APP_URL, tag: 'teste' }, vapid);
       return json({ ok: true, enviados: n });
+    }
+    if (body.acao === 'aviso') {
+      const user = await usuario(req);
+      if (!user) return json({ erro: 'Faça login novamente.' }, 401);
+      return json(await avisoPagamento(user, String(body.tipo || ''), Number(body.mensalidade_id), vapid));
     }
     if (!seg.cron_token || req.headers.get('x-token') !== seg.cron_token) return json({ erro: 'Não autorizado.' }, 401);
     return json(await rodarLembretes(vapid));
