@@ -167,7 +167,7 @@ async function loadData(){const m=S.mod,D={};const mi=mesIni(),prox=addMes(mi,1)
       q(sb.from('alunos').select('*').eq('id',a).single()).then(r=>{S.aluno=r}),
       q(sb.from('presencas').select('data').eq('aluno_id',a).gte('data',ant2)).then(r=>D.pres=(r||[]).map(x=>x.data)),
       q(sb.from('competicoes').select('*').eq('aluno_id',a).order('data',{ascending:false})).then(r=>D.comps=r||[]),
-      q(sb.from('mensalidades').select('*').eq('aluno_id',a).order('competencia',{ascending:false}).limit(12)).then(r=>D.mens=r||[]),
+      q(sb.from('mensalidades').select('*').eq('aluno_id',a).order('competencia',{ascending:false}).limit(240)).then(r=>D.mens=r||[]),
       q(sb.from('graduacoes').select('*').eq('aluno_id',a).order('data',{ascending:true}).order('id',{ascending:true})).then(r=>D.grads=r||[]),
       qs(sb.rpc('config_aluno',{p_mod:m}),async()=>[await qs(sb.from('config').select('*').eq('modalidade',m).maybeSingle(),null)]).then(r=>D.cfg=(r||[])[0]||null),
       qs(sb.rpc('dados_pix',{p_mod:m}),[]).then(r=>D.pix=(r||[])[0]||null),
@@ -184,11 +184,14 @@ async function loadData(){const m=S.mod,D={};const mi=mesIni(),prox=addMes(mi,1)
       q(sb.from('papeis').select('*').eq('modalidade',m)).then(r=>D.equipe=r||[]),
       qs(sb.from('valores_alunos').select('*').eq('modalidade',m),[]).then(r=>D.valores=r||[]),
       q(sb.from('convites_staff').select('*').eq('modalidade',m)).then(r=>D.convites=r||[]),
-      (async()=>{await q(sb.rpc('gerar_mensalidades',{p_mod:m,p_comp:mi}));D.mens=await q(sb.from('mensalidades').select('*').eq('modalidade',m).eq('competencia',mi))||[]})());
+      (async()=>{await q(sb.rpc('gerar_mensalidades',{p_mod:m,p_comp:mi}));D.mens=await q(sb.from('mensalidades').select('*').eq('modalidade',m).eq('competencia',mi))||[]})(),
+      q(sb.from('mensalidades').select('*').eq('modalidade',m).eq('status','pendente').lt('competencia',mi).order('competencia')).then(r=>D.atr=r||[]),
+      qs(sb.from('mensalidades').select('competencia').eq('modalidade',m).order('competencia').limit(1).maybeSingle(),null).then(r=>D.mes0=r?r.competencia:mi),
+      (S.finMes&&S.finMes!==mi?q(sb.from('mensalidades').select('*').eq('modalidade',m).eq('competencia',S.finMes)).then(r=>D.finRows=r||[]):Promise.resolve()));
   }
   await Promise.all(L);
   // aluno inativo não conta na mensalidade: só fica o que ele já pagou (dinheiro recebido)
-  if(S.role==='resp'&&D.mens&&D.alunos){const at=new Set(D.alunos.filter(a=>a.status==='ativo').map(a=>a.id));D.mens=D.mens.filter(x=>x.status==='pago'||at.has(x.aluno_id))}
+  if(S.role==='resp'&&D.mens&&D.alunos){const at=new Set(D.alunos.filter(a=>a.status==='ativo').map(a=>a.id));D.mens=D.mens.filter(x=>x.status==='pago'||at.has(x.aluno_id));D.atr=(D.atr||[]).filter(x=>at.has(x.aluno_id))}
   S.D=D}
 
 /* ---------- regras ---------- */
@@ -388,11 +391,12 @@ function rankRows(r){return (r||[]).map(x=>({a:{id:x.aluno_id,nome:x.nome},pts:x
 function aInicio(){const D=S.D,a=S.aluno,mi=D.mi;const rc=ordComp(rankRows(D.rank)),rf=ordFreq(rankRows(D.rank));const pc=rc.findIndex(s=>s.a.id===a.id),pf=rf.findIndex(s=>s.a.id===a.id);
   const ac=ordComp(rankRows(D.rankAnt))[0],af=ordFreq(rankRows(D.rankAnt))[0];const temAnt=ac||af;
   const kc=temAnt?ac:rc[0],kf=temAnt?af:rf[0];const presMes=(D.pres||[]).filter(x=>x>=mi).length;
-  const mrow=(D.mens||[]).find(x=>x.competencia===mi);const st=statusMens(mrow,D.cfg);
+  const mrow=(D.mens||[]).find(x=>x.competencia===mi);const st=statusMens(mrow,D.cfg);const atrA=(D.mens||[]).filter(x=>x.competencia<mi&&x.status!=='pago'&&!x.informado_em);
   return `<div class="hello"><small>Bem-vindo de volta</small><h1 class="h1">Olá, ${esc(first(a.nome))}</h1></div>
   ${!contratoOk(a,D.cfg)?`<button class="warnbox" onclick="go({tab:'perfil',sub:'contrato'})">${ic('alert')}<span><b>Contrato aguardando seu aceite.</b><br>Toque para ler e aceitar.</span></button>`:''}
   ${checkinCard()}
   ${notifEstado()==='off'&&LS.get('notif_banner2')!=='x'?`<div class="warnbox" style="border-color:rgba(255,255,255,.15);background:var(--card)">${ic('bell')}<span style="flex:1"><b>Receba os avisos no celular</b><br>Avisos da academia e lembretes de mensalidade.<br><button class="btn sm mt8" onclick="ativarNotif()">Ativar</button> <button class="link" onclick="LS.set('notif_banner2','x');render(true)">Agora não</button></span></div>`:''}
+  ${atrA.length?`<button class="warnbox" style="border-color:rgba(255,90,90,.45);background:rgba(255,90,90,.08)" onclick="go({tab:'mensal'})">${ic('alert')}<span><b>${atrA.length} mensalidade${atrA.length>1?'s':''} em atraso (${atrA.map(x=>nomeMes(x.competencia).toLowerCase()).join(', ')}).</b><br>Total ${money(atrA.reduce((t,x)=>t+Number(x.valor),0))}. Toque para pagar.</span></button>`:''}
   ${mrow&&st!=='pago'&&!mrow.informado_em?`<button class="warnbox" onclick="go({tab:'mensal'})">${ic('money')}<span><b>Mensalidade de ${nomeMes(mi).toLowerCase()} ${st==='atrasado'?'atrasada':'em aberto'}.</b><br>Toque para pagar por Pix ou cartão.</span></button>`:''}
   ${mrow&&mrow.link_pagamento&&st!=='pago'&&!mrow.informado_em?`<button class="warnbox" style="border-color:rgba(46,204,113,.4);background:rgba(46,204,113,.08)" onclick="go({tab:'mensal'})">${ic('card')}<span><b>Seu link de pagamento chegou.</b><br>Toque para pagar no cartão.</span></button>`:''}
   ${feedCard(D.feed)}
@@ -423,6 +427,7 @@ function vRanking(){const D=S.D,k=S.rk;const list=k==='comp'?ordComp(rankRows(D.
   ${list.length?`<div class="podium">${pod}</div><div>${rows}</div>`:`<div class="empty mt16">${k==='comp'?'Nenhum resultado de competição confirmado neste mês ainda.':'Nenhuma presença registrada neste mês ainda.'}</div>`}
   <div class="card mt16 rules"><b>Como funciona</b>${k==='comp'?`<div class="pts"><div><b>3</b>Ouro</div><div><b>2</b>Prata</div><div><b>1</b>Bronze</div><div><b>1</b>Particip.</div></div><ol class="mt8"><li>Mais pontos no mês</li><li>Desempate: mais ouros</li><li>Depois: mais competições</li><li>Por último: mais treinos</li></ol><p class="mut tiny mt8">Só contam resultados confirmados pelo professor.</p>`:`<ol class="mt8"><li>Mais presenças nos treinos do mês</li><li>Desempate: mais competições no mês</li></ol>`}</div>
   ${hist?`<div class="sec-t">Campeões anteriores</div>${hist}`:''}`}
+function pagarMesSheet(mid){const r=(S.D.mens||[]).find(x=>x.id===mid);if(!r)return;openSheet(`<h3>Mensalidade de ${mesAno(r.competencia).toLowerCase()}</h3><p class="mut">${money(r.valor)} • ${statusMens(r,S.D.cfg)==='atrasado'?'<b style="color:#ff7a7a">atrasada</b>':'em aberto'}</p>${pagarBloco(r)}`)}
 function pagarBloco(row){const D=S.D,pix=D.pix;
   if(row&&row.informado_em)return `<div class="info" style="border-style:solid;border-color:rgba(245,180,0,.4)">${ic('clock')}<span><b>Pagamento informado</b> (${esc(row.informado_metodo||'')}) em ${dataHora(row.informado_em)}.<br>Aguardando o professor confirmar o recebimento.</span></div>`;
   let h='';
@@ -440,12 +445,15 @@ function pagarBloco(row){const D=S.D,pix=D.pix;
   return h}
 function aMensal(){const D=S.D,a=S.aluno,cfg=D.cfg||{dia_vencimento:10};const mi=D.mi;const row=(D.mens||[]).find(x=>x.competencia===mi);const st=statusMens(row,cfg);
   const label={pago:'Em dia',pendente:'Pendente',atrasado:'Atrasada'}[st];const hist=(D.mens||[]).filter(x=>x.competencia!==mi);
+  const atr=hist.filter(x=>x.status!=='pago'&&x.competencia<mi),totAtr=atr.reduce((t,x)=>t+Number(x.valor),0);
   return `<div class="hello"><small>${MODS[S.mod].nome}</small><h1 class="h1">Mensalidade</h1></div>
   <div class="paycard ${st}"><span class="st" style="color:${st==='pago'?'#4ee28a':st==='pendente'?'#ffcc3d':'#ff7a7a'}">${label}</span><div class="big">${row?money(row.valor):'—'}</div><small class="mut">${nomeMes(mi)}/${mi.slice(0,4)} • vencimento ${pad(cfg.dia_vencimento)}/${mi.slice(5,7)}</small>
   ${!row?`<p class="mut tiny mt8">O valor aparece aqui assim que o professor gerar a mensalidade do mês.</p>`:''}
   ${st==='pago'?`<p class="mt12" style="font-size:14px">Pago${row.metodo?' via <b>'+row.metodo+'</b>':''}${row.pago_em?' em '+br(row.pago_em.slice(0,10)):''}.</p>`:''}</div>
+  ${atr.length?`<div class="card mt12" style="border-color:rgba(255,90,90,.4);background:rgba(255,90,90,.06)"><div class="row">${ic('alert')}<b>${atr.length} mensalidade${atr.length>1?'s':''} em atraso</b></div><p class="mut mt8" style="font-size:13px">Total: <b style="color:#ff7a7a">${money(totAtr)}</b>. Toque em cada mês para pagar.</p>
+    <div class="gap8 mt8" style="flex-wrap:wrap">${atr.map(h=>`<button class="btn sm ${h.informado_em?'ghost':'danger'}" style="flex:0 0 auto" onclick="pagarMesSheet(${h.id})">${abrev(h.competencia)} • ${money(h.valor)}${h.informado_em?' • informado':''}</button>`).join('')}</div></div>`:''}
   ${st!=='pago'?pagarBloco(row):''}
-  ${hist.length?`<div class="sec-t">Histórico</div>${hist.map(h=>`<div class="li"><div class="grow">${nomeMes(h.competencia)}/${h.competencia.slice(0,4)}<small>${h.status==='pago'?'Pago'+(h.metodo?' via '+h.metodo:'')+(h.pago_em?' em '+br(h.pago_em.slice(0,10)):''):money(h.valor)}</small></div>${h.status!=='pago'&&h.informado_em?'<span class="badge b-warn">Informado</span>':payBadge(statusMens(h,cfg))}</div>`).join('')}`:''}`}
+  ${(D.mens||[]).length?`<div class="sec-t">Todos os meses</div>${(D.mens||[]).map(h=>`<div class="li" ${h.status!=='pago'?`onclick="pagarMesSheet(${h.id})" style="cursor:pointer"`:''}><div class="grow">${nomeMes(h.competencia)}/${h.competencia.slice(0,4)}<small>${h.status==='pago'?'Pago'+(h.metodo?' via '+h.metodo:'')+(h.pago_em?' em '+br(h.pago_em.slice(0,10)):''):money(h.valor)}</small></div>${h.status==='pago'?'<span class="badge b-ok">Pago</span>':h.informado_em?'<span class="badge b-warn">Informado</span>':payBadge(statusMens(h,cfg))}</div>`).join('')}`:''}`}
 /* Pix copia e cola (BR Code do Banco Central) */
 function tlv(id,v){v=String(v);return id+String(v.length).padStart(2,'0')+v}
 function crc16(t){let c=0xFFFF;for(let i=0;i<t.length;i++){c^=t.charCodeAt(i)<<8;for(let j=0;j<8;j++){c=(c&0x8000)?((c<<1)^0x1021):(c<<1);c&=0xFFFF}}return c.toString(16).toUpperCase().padStart(4,'0')}
@@ -458,7 +466,7 @@ async function copiar(txt,ok){try{await navigator.clipboard.writeText(txt);toast
 function copiarPix(mid){const D=S.D,m=(D.mens||[]).find(x=>x.id===mid);if(!D.pix||!D.pix.pix_chave)return;
   copiar(pixCopiaCola({chave:D.pix.pix_chave,nome:D.pix.pix_nome,cidade:D.pix.pix_cidade,valor:m?m.valor:null,txid:m?('MEN'+m.id):''}),'Código Pix copiado! Cole no app do seu banco.')}
 function avisar(tipo,mid){try{sb.functions.invoke('notificar',{body:{acao:'aviso',tipo,mensalidade_id:mid}})}catch(e){}}
-function pedirLink(mid){act(async()=>{await q(sb.rpc('solicitar_link_cartao',{p_mensalidade:mid}));avisar('link_pedido',mid);await loadData();render(true);toast('Pedido enviado! O professor vai mandar o link aqui no app.')})}
+function pedirLink(mid){closeSheet();act(async()=>{await q(sb.rpc('solicitar_link_cartao',{p_mensalidade:mid}));avisar('link_pedido',mid);await loadData();render(true);toast('Pedido enviado! O professor vai mandar o link aqui no app.')})}
 function jaPaguei(mid){openSheet(`<h3>Já paguei</h3><p class="mut">Avise o professor para ele confirmar o recebimento.</p>
   <label class="lbl">Como você pagou?</label><div class="radio" id="jp_m">${['Pix','Cartão'].map((x,i)=>`<button class="${i===0?'on':''}" onclick="document.querySelectorAll('#jp_m button').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${x}</button>`).join('')}</div>
   <button class="btn ok mt16" onclick="informarPag(${mid})">${ic('check')}Avisar o professor</button>`)}
@@ -518,8 +526,8 @@ const ativos=()=>(S.D.alunos||[]).filter(a=>a.status==='ativo');
 const nomeAluno=id=>{const a=(S.D.alunos||[]).find(x=>x.id===id);return a?a.nome:'—'};
 function pPainel(){if(S.sub==='ranking')return backBar('Painel')+vRanking();
   const D=S.D,resp=S.role==='resp',h=hoje();const at=ativos();const presHoje=(D.pres||[]).filter(p=>p.data===h).length;const ckVai=(D.ck||[]).filter(c=>c.data===h&&c.vai).length;
-  const pedidos=resp?(D.mens||[]).filter(x=>x.status!=='pago'&&(x.informado_em||(x.link_solicitado_em&&!x.link_pagamento))).length:0;const pend=(D.comps||[]).filter(c=>c.status==='pendente').length;
-  const mats=(D.alunos||[]).filter(a=>a.status==='pendente').length;const aberto=(D.mens||[]).filter(x=>x.status!=='pago').length;
+  const pedidos=resp?[...(D.atr||[]),...(D.mens||[])].filter(x=>x.status!=='pago'&&(x.informado_em||(x.link_solicitado_em&&!x.link_pagamento))).length:0;const pend=(D.comps||[]).filter(c=>c.status==='pendente').length;
+  const mats=(D.alunos||[]).filter(a=>a.status==='pendente').length;const aberto=(D.mens||[]).filter(x=>x.status!=='pago').length+(D.atr||[]).length;
   const rc=ordComp(rankRows(D.rank)),rf=ordFreq(rankRows(D.rank));
   return `<div class="hello"><small>${dataExt(h)}</small><h1 class="h1">Olá, ${resp?'Prof. ':''}${esc(first(S.pname))}</h1></div>
   <div class="grid2"><div class="stat acc"><b>${at.length}</b><small>Alunos ativos</small></div><div class="stat"><b>${presHoje||ckVai}</b><small>${presHoje?'Presentes hoje':'Confirmaram presença hoje'}</small></div>
@@ -593,11 +601,11 @@ function confComp(id,v){act(async()=>{if(v)await q(sb.from('competicoes').update
   await loadData();render(true);toast(v?'Confirmado — já conta no ranking':'Resultado recusado')})}
 
 /* ---------- GESTÃO (responsável) ---------- */
-function pGestao(){if(S.role!=='resp')return '';if(S.sub)return backBar('Gestão')+({mats:gMats,alunos:gAlunos,fin:gFin,equipe:gEquipe,contratos:gContratos}[S.sub]||gMats)();
-  const D=S.D;const at=ativos();const mens=D.mens||[];const rec=mens.filter(x=>x.status==='pago').reduce((t,x)=>t+Number(x.valor),0);const ab=mens.filter(x=>x.status!=='pago').reduce((t,x)=>t+Number(x.valor),0);
+function pGestao(){if(S.role!=='resp')return '';if(!S.sub)S.finMes=null;if(S.sub)return backBar('Gestão')+({mats:gMats,alunos:gAlunos,fin:gFin,equipe:gEquipe,contratos:gContratos}[S.sub]||gMats)();
+  const D=S.D;const at=ativos();const mens=D.mens||[];const rec=mens.filter(x=>x.status==='pago').reduce((t,x)=>t+Number(x.valor),0);const ab=mens.filter(x=>x.status!=='pago').reduce((t,x)=>t+Number(x.valor),0);const abAnt=(D.atr||[]).reduce((t,x)=>t+Number(x.valor),0);
   const ac=at.filter(a=>contratoOk(a,D.cfg)).length;const mats=(D.alunos||[]).filter(a=>a.status==='pendente').length;const aux=(D.equipe||[]).filter(x=>x.papel==='aux').length;
   return `<div class="hello"><small>Somente professor responsável</small><h1 class="h1">Gestão</h1></div>
-  <div class="card"><small class="mut">${nomeMes(D.mi)}/${D.mi.slice(0,4)}</small><div class="row mt8" style="justify-content:space-between"><div><b style="font-size:22px;color:var(--ok)">${money(rec)}</b><br><small class="mut">recebido</small></div><div style="text-align:right"><b style="font-size:22px;color:var(--warn)">${money(ab)}</b><br><small class="mut">em aberto</small></div></div><div class="bar mt12"><i style="width:${Math.round(rec/((rec+ab)||1)*100)}%;background:linear-gradient(90deg,#1fa85a,#2ecc71)"></i></div></div>
+  <div class="card"><small class="mut">${nomeMes(D.mi)}/${D.mi.slice(0,4)}</small><div class="row mt8" style="justify-content:space-between"><div><b style="font-size:22px;color:var(--ok)">${money(rec)}</b><br><small class="mut">recebido</small></div><div style="text-align:right"><b style="font-size:22px;color:var(--warn)">${money(ab)}</b><br><small class="mut">em aberto</small></div></div><div class="bar mt12"><i style="width:${Math.round(rec/((rec+ab)||1)*100)}%;background:linear-gradient(90deg,#1fa85a,#2ecc71)"></i></div>${abAnt?`<p class="mut tiny mt8">+ <b style="color:#ff7a7a">${money(abAnt)}</b> em atraso de meses anteriores</p>`:''}</div>
   <div class="grid2 mt12">
    <button class="tile" onclick="go({sub:'mats'})">${mats?`<span class="cnt">${mats}</span>`:''}${ic('file')}<b>Matrículas</b><small>${mats} aguardando</small></button>
    <button class="tile" onclick="go({sub:'alunos'})">${ic('users')}<b>Alunos</b><small>${at.length} ativos</small></button>
@@ -650,6 +658,8 @@ function alunoSheet(id){const a=(S.D.alunos||[]).find(x=>x.id===id),jj=S.mod==='
   ${a.status==='ativo'?`<hr class="sep"><div class="row" style="justify-content:space-between"><b>Mensalidade de ${nomeMes(D.mi).toLowerCase()}</b>${payBadge(st)}</div>
   <p class="mut mt8" style="font-size:13px">${money(m?m.valor:(valorDe(a.id)?valorDe(a.id).valor:precoPadrao()))}${m&&m.status==='pago'?' • pago'+(m.metodo?' via '+m.metodo:''):''}</p>
   ${m&&m.status!=='pago'?`<button class="btn sm ok mt8" style="width:100%" onclick="pagSheet(${m.id})">${ic('money')}Registrar pagamento</button>`:''}`:''}
+  ${(()=>{const at=(D.atr||[]).filter(x=>x.aluno_id===id);return at.length?`<div class="warnbox mt8" style="border-color:rgba(255,90,90,.35);background:rgba(255,90,90,.07)">${ic('alert')}<span><b>${at.length} mensalidade${at.length>1?'s':''} atrasada${at.length>1?'s':''}</b> de meses anteriores: ${at.map(x=>abrev(x.competencia)).join(', ')} (${money(at.reduce((t,x)=>t+Number(x.valor),0))})</span></div>`:''})()}
+  <button class="btn sm ghost mt8" style="width:100%" onclick="histSheet('${a.id}')">${ic('money')}Ver todos os meses</button>
   <hr class="sep"><div class="row" style="justify-content:space-between"><b>Frequência</b><span>${nPres} treino${nPres!==1?'s':''} em ${nomeMes(D.mi).toLowerCase()}</span></div>
   <div class="row mt12" style="justify-content:space-between"><b>Contrato</b>${contratoOk(a,D.cfg)?'<span class="badge b-ok">Aceito</span>':'<span class="badge b-warn">Pendente</span>'}</div>
   ${a.status==='ativo'?`<button class="btn danger mt16" onclick="setCampo('${a.id}',{status:'inativo'},true)">Inativar aluno</button>`:`<button class="btn ok mt16" onclick="setCampo('${a.id}',{status:'ativo'},true)">Reativar aluno</button>`}`)}
@@ -677,18 +687,40 @@ function salvarValor(id){const t=$('#v_val').value.trim().replace(',','.');const
 function salvarGrad(id){const a=S.D.alunos.find(x=>x.id===id);const f=+$('#g_f').value,g=$('#g_g')?+$('#g_g').value:0;if(f===a.faixa&&g===a.grau){toast('Nenhuma alteração',true);return}
   act(async()=>{await q(sb.from('alunos').update({faixa:f,grau:g}).eq('id',id));await loadData();alunoSheet(id);render(true);toast('Graduação atualizada: '+faixaNome(S.mod,f,g))})}
 function setCampo(id,obj,fechar){act(async()=>{await q(sb.from('alunos').update(obj).eq('id',id));await loadData();if(fechar)closeSheet();else alunoSheet(id);render(true);toast('Salvo')})}
-function pagSheet(mid){const m=S.D.mens.find(x=>x.id===mid);openSheet(`<h3>Registrar pagamento</h3><p class="mut">${esc(nomeAluno(m.aluno_id))} • ${nomeMes(m.competencia)} • ${money(m.valor)}</p>
+const todasMens=()=>{const D=S.D;return [...(D.mens||[]),...(D.atr||[]),...(D.finRows||[]),...(S.histRows||[])]};
+const achaMens=id=>todasMens().find(x=>x.id===id);
+const mesAno=c=>`${nomeMes(c)}/${c.slice(0,4)}`;
+const abrev=c=>`${nomeMes(c).slice(0,3)}/${c.slice(2,4)}`;
+function pagSheet(mid){const m=achaMens(mid);openSheet(`<h3>Registrar pagamento</h3><p class="mut">${esc(nomeAluno(m.aluno_id))} • ${mesAno(m.competencia)} • ${money(m.valor)}</p>
   <label class="lbl">Forma de pagamento</label><div class="radio" id="pg_m">${['Espécie','Pix','Cartão'].map((x,i)=>`<button class="${i===0?'on':''}" onclick="document.querySelectorAll('#pg_m button').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${x}</button>`).join('')}</div>
   <button class="btn ok mt16" onclick="registrarPag(${mid})">${ic('check')}Confirmar pagamento</button>`)}
-function registrarPag(mid){const met=$('#pg_m .on').textContent;act(async()=>{await q(sb.from('mensalidades').update({status:'pago',metodo:met,pago_em:new Date().toISOString(),registrado_por:uid()}).eq('id',mid));closeSheet();await loadData();render(true);toast('Pagamento registrado ('+met+')')})}
-function desfazerPag(mid){act(async()=>{await q(sb.from('mensalidades').update({status:'pendente',metodo:null,pago_em:null}).eq('id',mid));await loadData();render(true);toast('Pagamento desfeito')})}
-function gFin(){const D=S.D,cfg=D.cfg||{preco:0,dia_vencimento:10};const mens=D.mens||[];const g=k=>mens.filter(x=>statusMens(x,cfg)===k);const ord={atrasado:0,pendente:1,pago:2};const met=k=>mens.filter(x=>x.status==='pago'&&x.metodo===k).length;
-  return `<div class="h1 mt8">Financeiro</div><p class="mut mt8">${nomeMes(D.mi)}/${D.mi.slice(0,4)}</p>
+function registrarPag(mid){const met=$('#pg_m .on').textContent;const m=achaMens(mid);act(async()=>{await q(sb.from('mensalidades').update({status:'pago',metodo:met,pago_em:new Date().toISOString(),registrado_por:uid()}).eq('id',mid));closeSheet();await loadData();render(true);toast('Pagamento registrado ('+met+')');if(S.histAluno&&m&&m.aluno_id===S.histAluno)histSheet(S.histAluno)})}
+function desfazerPag(mid){const m=achaMens(mid);act(async()=>{await q(sb.from('mensalidades').update({status:'pendente',metodo:null,pago_em:null}).eq('id',mid));await loadData();render(true);toast('Pagamento desfeito');if(S.histAluno&&m&&m.aluno_id===S.histAluno)histSheet(S.histAluno)})}
+// todos os meses de um aluno (ficha do aluno)
+async function histSheet(id){S.histAluno=id;const a=(S.D.alunos||[]).find(x=>x.id===id),cfg=S.D.cfg;
+  try{S.histRows=await q(sb.from('mensalidades').select('*').eq('aluno_id',id).order('competencia',{ascending:false}).limit(240))||[]}catch(e){toast(e.message,true);return}
+  const l=S.histRows,dev=l.filter(x=>x.status!=='pago'),tot=dev.reduce((t,x)=>t+Number(x.valor),0);
+  openSheet(`<h3>${esc(a?a.nome:'Aluno')}</h3><p class="mut">Todas as mensalidades${dev.length?` • <b style="color:#ff7a7a">${dev.length} em aberto (${money(tot)})</b>`:' • tudo em dia'}</p>
+  <div class="mt12">${l.length?l.map(m=>{const st=statusMens(m,cfg);return `<div class="li"><div class="grow">${mesAno(m.competencia)}<small>${money(m.valor)}${m.status==='pago'?' • pago'+(m.metodo?' via '+m.metodo:'')+(m.pago_em?' em '+brCurto(m.pago_em.slice(0,10)):''):m.informado_em?' • aluno informou que pagou':''}</small></div>${m.status==='pago'?`<button class="badge b-ok" style="border:0" onclick="if(confirmar(this))desfazerPag(${m.id})">Pago</button>`:`${payBadge(st)}<button class="btn sm ok" style="margin-left:6px" onclick="pagSheet(${m.id})">Registrar</button>`}</div>`}).join(''):'<div class="empty">Nenhuma mensalidade ainda.</div>'}</div>`)}
+function finMes(n){const D=S.D;const alvo=addMes(S.finMes||D.mi,n);if(alvo>D.mi||alvo<(D.mes0||D.mi))return;S.finMes=alvo===D.mi?null:alvo;act(async()=>{await loadData();render(true)})}
+function atrasoBloco(){const D=S.D,l=D.atr||[];if(!l.length)return '';const tot=l.reduce((t,x)=>t+Number(x.valor),0);
+  const por={};l.forEach(m=>(por[m.aluno_id]=por[m.aluno_id]||[]).push(m));
+  const al=Object.keys(por).sort((x,y)=>por[y].length-por[x].length||nomeAluno(x).localeCompare(nomeAluno(y)));
+  return `<div class="sec-t">Atrasadas de meses anteriores <span class="cnt">${l.length}</span></div>
+  <div class="card" style="border-color:rgba(255,90,90,.35);margin-bottom:8px"><div class="row" style="justify-content:space-between"><span class="mut">Total em atraso</span><b style="font-size:20px;color:#ff7a7a">${money(tot)}</b></div><p class="mut tiny mt8">${al.length} aluno${al.length>1?'s':''} com mensalidade atrasada. Toque no mês para registrar o pagamento.</p></div>
+  ${al.map(id=>{const ms=por[id];return `<div class="card" style="margin-bottom:8px"><div class="row" style="justify-content:space-between"><b>${esc(nomeAluno(id))}</b><small style="color:#ff7a7a;font-weight:700">${money(ms.reduce((t,x)=>t+Number(x.valor),0))}</small></div>
+    <div class="gap8 mt8" style="flex-wrap:wrap">${ms.map(m=>`<button class="btn sm ${m.informado_em?'':'danger'}" style="flex:0 0 auto" onclick="pagSheet(${m.id})">${abrev(m.competencia)} • ${money(m.valor)}${m.informado_em?' • informou':''}</button>`).join('')}</div>
+    <button class="link mt8" onclick="histSheet('${id}')">Ver todos os meses</button></div>`}).join('')}`}
+function gFin(){const D=S.D,cfg=D.cfg||{preco:0,dia_vencimento:10};const M=S.finMes||D.mi,atual=M===D.mi;const mens=atual?(D.mens||[]):(D.finRows||[]);const g=k=>mens.filter(x=>statusMens(x,cfg)===k);const ord={atrasado:0,pendente:1,pago:2};const met=k=>mens.filter(x=>x.status==='pago'&&x.metodo===k).length;
+  const recM=mens.filter(x=>x.status==='pago').reduce((t,x)=>t+Number(x.valor),0),abM=mens.filter(x=>x.status!=='pago').reduce((t,x)=>t+Number(x.valor),0);
+  return `<div class="h1 mt8">Financeiro</div>
+  <div class="card mt12" style="padding:10px 12px"><div class="row" style="justify-content:space-between"><button class="btn sm ghost" style="flex:0 0 44px" ${M<=(D.mes0||D.mi)?'disabled':''} onclick="finMes(-1)" aria-label="Mês anterior">‹</button><div style="text-align:center"><b style="font-size:17px">${mesAno(M)}</b><br><small class="mut">${atual?'mês atual':'toque › para voltar'}</small></div><button class="btn sm ghost" style="flex:0 0 44px" ${atual?'disabled':''} onclick="finMes(1)" aria-label="Próximo mês">›</button></div>
+  <div class="row mt8" style="justify-content:space-between;font-size:13px"><span class="mut">Recebido <b style="color:var(--ok)">${money(recM)}</b></span><span class="mut">Em aberto <b style="color:var(--warn)">${money(abM)}</b></span></div></div>
   <div class="sum3 mt12"><div class="stat"><b style="color:var(--ok)">${g('pago').length}</b><small>Em dia</small></div><div class="stat"><b style="color:var(--warn)">${g('pendente').length}</b><small>Pendentes</small></div><div class="stat"><b style="color:var(--bad)">${g('atrasado').length}</b><small>Atrasados</small></div></div>
   <div class="card mt12"><small class="mut">Recebido por forma de pagamento</small><div class="sum3 mt8"><div><b>${met('Cartão')}</b> <small class="mut">Cartão</small></div><div><b>${met('Pix')}</b> <small class="mut">Pix</small></div><div><b>${met('Espécie')}</b> <small class="mut">Espécie</small></div></div></div>
-  ${pedidosBloco()}
-  <div class="sec-t">Alunos</div>
-  ${mens.length?[...mens].sort((x,y)=>ord[statusMens(x,cfg)]-ord[statusMens(y,cfg)]||nomeAluno(x.aluno_id).localeCompare(nomeAluno(y.aluno_id))).map(m=>{const s=statusMens(m,cfg);return `<div class="li"><div class="av" style="width:34px;height:34px;font-size:11px">${initials(nomeAluno(m.aluno_id))}</div><div class="grow">${esc(nomeAluno(m.aluno_id))}<small>${m.status==='pago'?'Pago via '+(m.metodo||'—')+(m.pago_em?' em '+brCurto(m.pago_em.slice(0,10)):''):money(m.valor)+(valorDe(m.aluno_id)?' (valor próprio)':'')+' • vence '+pad(cfg.dia_vencimento)+'/'+D.mi.slice(5,7)}</small></div>${m.status==='pago'?`<button class="badge b-ok" style="border:0" onclick="if(confirmar(this))desfazerPag(${m.id})">Pago</button>`:`<button class="btn sm ok" onclick="pagSheet(${m.id})">Registrar</button>`}</div>`}).join(''):'<div class="empty">Nenhuma mensalidade neste mês (sem alunos ativos).</div>'}
+  ${atual?pedidosBloco()+atrasoBloco():''}
+  <div class="sec-t">${atual?'Alunos — mês atual':'Alunos — '+mesAno(M).toLowerCase()}</div>
+  ${mens.length?[...mens].sort((x,y)=>ord[statusMens(x,cfg)]-ord[statusMens(y,cfg)]||nomeAluno(x.aluno_id).localeCompare(nomeAluno(y.aluno_id))).map(m=>{const s=statusMens(m,cfg);return `<div class="li"><div class="av" style="width:34px;height:34px;font-size:11px">${initials(nomeAluno(m.aluno_id))}</div><div class="grow" onclick="histSheet('${m.aluno_id}')" style="cursor:pointer">${esc(nomeAluno(m.aluno_id))}<small>${m.status==='pago'?'Pago via '+(m.metodo||'—')+(m.pago_em?' em '+brCurto(m.pago_em.slice(0,10)):''):money(m.valor)+(valorDe(m.aluno_id)?' (valor próprio)':'')+' • vence '+pad(cfg.dia_vencimento)+'/'+M.slice(5,7)}</small></div>${m.status==='pago'?`<button class="badge b-ok" style="border:0" onclick="if(confirmar(this))desfazerPag(${m.id})">Pago</button>`:`<button class="btn sm ok" onclick="pagSheet(${m.id})">Registrar</button>`}</div>`}).join(''):'<div class="empty">Nenhuma mensalidade neste mês.</div>'}
   <div class="sec-t">Configuração</div>
   <div class="card"><div class="gap8"><div style="flex:1"><label class="lbl" style="margin-top:0">Valor padrão (R$)</label><input class="in sm" id="cf_p" type="number" step="0.01" inputmode="decimal" value="${cfg.preco}"></div><div style="flex:1"><label class="lbl" style="margin-top:0">Vencimento (dia)</label><input class="in sm" id="cf_d" type="number" min="1" max="28" value="${cfg.dia_vencimento}"></div></div>
   <label class="lbl">Chave Pix (aparece para os alunos)</label><input class="in sm" id="cf_pix" autocapitalize="none" placeholder="CPF, celular, e-mail ou chave aleatória" value="${esc(cfg.pix_chave?fmtChave(cfg.pix_chave):'')}">
@@ -699,15 +731,15 @@ function gFin(){const D=S.D,cfg=D.cfg||{preco:0,dia_vencimento:10};const mens=D.
 function normChave(v){v=String(v||'').trim();if(!v)return '';if(/@/.test(v))return v.toLowerCase();const dg=v.replace(/\D/g,'');
   if(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v))return v.toLowerCase();
   if(/^\+/.test(v))return '+'+dg;if(dg.length===11&&/[.\-]/.test(v))return dg;if(dg.length===14)return dg;if(dg.length===11&&dg[2]==='9'&&!/[.\-]/.test(v)&&!/^\d{3}\.?\d{3}/.test(v))return '+55'+dg;return dg.length>=11?dg:v}
-function pedidosBloco(){const D=S.D;const l=(D.mens||[]).filter(x=>x.status!=='pago'&&(x.informado_em||(x.link_solicitado_em&&!x.link_pagamento)));if(!l.length)return '';
+function pedidosBloco(){const D=S.D;const l=[...(D.atr||[]),...(D.mens||[])].filter(x=>x.status!=='pago'&&(x.informado_em||(x.link_solicitado_em&&!x.link_pagamento)));if(!l.length)return '';
   return `<div class="sec-t">Pedidos <span class="cnt">${l.length}</span></div>${l.map(m=>m.informado_em
-   ?`<div class="card" style="margin-bottom:8px;border-color:rgba(245,180,0,.4)"><b>${esc(nomeAluno(m.aluno_id))}</b> informou que pagou via <b>${esc(m.informado_metodo||'')}</b><br><small class="mut">${dataHora(m.informado_em)} • ${money(m.valor)}</small>
+   ?`<div class="card" style="margin-bottom:8px;border-color:rgba(245,180,0,.4)"><b>${esc(nomeAluno(m.aluno_id))}</b> informou que pagou ${mesAno(m.competencia).toLowerCase()} via <b>${esc(m.informado_metodo||'')}</b><br><small class="mut">${dataHora(m.informado_em)} • ${money(m.valor)}</small>
      <div class="gap8 mt12"><button class="btn sm ok" style="flex:1" onclick="confirmarInformado(${m.id})">${ic('check')}Recebi</button><button class="btn sm danger" style="flex:1" onclick="recusarInformado(${m.id})">Não recebi</button></div></div>`
-   :`<div class="card" style="margin-bottom:8px"><b>${esc(nomeAluno(m.aluno_id))}</b> pediu o link do cartão<br><small class="mut">${dataHora(m.link_solicitado_em)} • ${money(m.valor)}</small>
+   :`<div class="card" style="margin-bottom:8px"><b>${esc(nomeAluno(m.aluno_id))}</b> pediu o link do cartão (${mesAno(m.competencia).toLowerCase()})<br><small class="mut">${dataHora(m.link_solicitado_em)} • ${money(m.valor)}</small>
      <input class="in sm mt12" id="lk_${m.id}" inputmode="url" autocapitalize="none" placeholder="Cole aqui o link de pagamento"><button class="btn sm mt8" style="width:100%" onclick="enviarLink(${m.id})">${ic('link')}Enviar link para o aluno</button></div>`).join('')}`}
 function enviarLink(mid){const u=($('#lk_'+mid).value||'').trim();if(!/^https?:\/\/\S+\.\S+/.test(u)){toast('Cole um link válido (começa com https://)',true);return}
   act(async()=>{await q(sb.from('mensalidades').update({link_pagamento:u}).eq('id',mid));avisar('link_enviado',mid);await loadData();render(true);toast('Link enviado! O aluno já vê no app.')})}
-function confirmarInformado(mid){const m=S.D.mens.find(x=>x.id===mid);act(async()=>{await q(sb.from('mensalidades').update({status:'pago',metodo:m.informado_metodo||'Pix',pago_em:new Date().toISOString(),registrado_por:uid()}).eq('id',mid));avisar('pago_confirmado',mid);await loadData();render(true);toast('Pagamento confirmado')})}
+function confirmarInformado(mid){const m=achaMens(mid);act(async()=>{await q(sb.from('mensalidades').update({status:'pago',metodo:m.informado_metodo||'Pix',pago_em:new Date().toISOString(),registrado_por:uid()}).eq('id',mid));avisar('pago_confirmado',mid);await loadData();render(true);toast('Pagamento confirmado')})}
 function recusarInformado(mid){act(async()=>{await q(sb.from('mensalidades').update({informado_em:null,informado_metodo:null}).eq('id',mid));avisar('pago_recusado',mid);await loadData();render(true);toast('Aviso removido. O aluno verá a mensalidade em aberto.')})}
 function confirmar(b){if(b.dataset.c){return true}b.dataset.c=1;b.textContent='Desfazer?';b.className='badge b-warn';setTimeout(()=>{if(b.isConnected){delete b.dataset.c;b.textContent='Pago';b.className='badge b-ok'}},3000);return false}
 function salvarCfg(){const p=parseFloat($('#cf_p').value),d=parseInt($('#cf_d').value);if(!(p>=0)||!(d>=1&&d<=28)){toast('Confira valor e dia (1 a 28)',true);return}

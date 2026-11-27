@@ -228,3 +228,4 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:16px 0}
 .warnbox svg{color:var(--warn)}
 .feed .dl{position:absolute;top:12px;right:12px;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:99px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;font:700 12px Inter;z-index:2}
 .feed .dl svg{width:16px;height:16px}
+.btn:disabled{opacity:.35;pointer-events:none}
