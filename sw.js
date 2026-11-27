@@ -1,6 +1,6 @@
 // Service worker: deixa o app instalável e abrindo rápido
-const CACHE = 'academia-v7';
-const CORE = ['./', './index.html', './style.css?v=7', './app.js?v=7', './config.js?v=7', './manifest.webmanifest',
+const CACHE = 'academia-v8';
+const CORE = ['./', './index.html', './style.css?v=8', './app.js?v=8', './config.js?v=8', './manifest.webmanifest',
   './img/jj_logo.webp', './img/judo_logo.webp', './img/judo_bg.jpg', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

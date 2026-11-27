@@ -143,6 +143,39 @@ async function avisoPagamento(user, tipo, mid, vapid) {
   return { ok: true, enviados };
 }
 
+// Novo aviso publicado pelo professor: notifica no celular todos os alunos ativos da modalidade
+async function avisoNovo(user, avisoId, vapid) {
+  if (!avisoId) return { ok: false };
+  const { data: av } = await admin.from('avisos').select('*').eq('id', avisoId).maybeSingle();
+  if (!av) return { ok: false };
+  const { data: pp } = await admin.from('papeis').select('papel').eq('modalidade', av.modalidade).eq('user_id', user.id).maybeSingle();
+  if (!pp) return { ok: false, erro: 'Não permitido' };
+  if (Date.now() - Date.parse(av.criado_em) > 15 * 60 * 1000) return { ok: false, erro: 'Aviso antigo' };
+  const { error } = await admin.from('notificacoes_log').insert({ chave: `aviso:${av.id}`, user_id: user.id });
+  if (error) return { ok: true, enviados: 0 }; // já foi enviado
+  const { data: al } = await admin.from('alunos').select('user_id').eq('modalidade', av.modalidade).eq('status', 'ativo').not('user_id', 'is', null);
+  const ids = [...new Set((al || []).map(a => a.user_id))].filter(u => u !== user.id);
+  const subs = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data } = await admin.from('push_inscricoes').select('*').in('user_id', ids.slice(i, i + 100));
+    subs.push(...(data || []));
+  }
+  const texto = String(av.texto || '').replace(/\s+/g, ' ').trim();
+  const msg = { titulo: `Novo aviso • ${MODN[av.modalidade] || ''}`, corpo: texto.length > 150 ? texto.slice(0, 147) + '…' : texto, url: APP_URL, tag: `aviso${av.id}` };
+  let enviados = 0;
+  for (let i = 0; i < subs.length; i += 25) { // envia de 25 em 25 ao mesmo tempo
+    const r = await Promise.all(subs.slice(i, i + 25).map(async (s) => {
+      try {
+        const st = await enviarPush(s, msg, vapid);
+        if (st === 404 || st === 410) await admin.from('push_inscricoes').delete().eq('endpoint', s.endpoint);
+        return st >= 200 && st < 300 ? 1 : 0;
+      } catch (e) { console.error('push erro', e); return 0; }
+    }));
+    enviados += r.reduce((t, x) => t + x, 0);
+  }
+  return { ok: true, alunos: ids.length, enviados };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ ok: true, servico: 'notificar' });
@@ -155,8 +188,13 @@ Deno.serve(async (req) => {
     if (body.acao === 'teste') {
       const user = await usuario(req);
       if (!user) return json({ erro: 'Faça login novamente.' }, 401);
-      const n = await enviarPara(user.id, { titulo: 'Notificações ativadas!', corpo: 'Você vai receber aqui os avisos de mensalidade.', url: APP_URL, tag: 'teste' }, vapid);
+      const n = await enviarPara(user.id, { titulo: 'Notificações ativadas!', corpo: 'Você vai receber aqui os avisos da academia e de mensalidade.', url: APP_URL, tag: 'teste' }, vapid);
       return json({ ok: true, enviados: n });
+    }
+    if (body.acao === 'novo_aviso') {
+      const user = await usuario(req);
+      if (!user) return json({ erro: 'Faça login novamente.' }, 401);
+      return json(await avisoNovo(user, Number(body.aviso_id), vapid));
     }
     if (body.acao === 'aviso') {
       const user = await usuario(req);

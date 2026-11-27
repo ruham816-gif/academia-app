@@ -380,7 +380,7 @@ async function sincronizarNotif(){try{if(notifEstado()==='on')await inscreverPus
 async function removerNotif(){try{if(!pushOk())return;const reg=await navigator.serviceWorker.getRegistration();const sub=reg&&await reg.pushManager.getSubscription();
   if(sub)await sb.rpc('remover_inscricao',{p_endpoint:sub.endpoint})}catch(e){}}
 function notifCard(){const e=notifEstado();if(e==='on'||e==='sem-suporte')return '';
-  const txt={off:S.role==='resp'?'Ative para ser avisado quando um aluno pedir o link do cartão ou informar um pagamento.':'Ative para receber um aviso quando a mensalidade estiver vencendo ou atrasada.',instalar:'No iPhone, as notificações funcionam com o app instalado: toque em Compartilhar → "Adicionar à Tela de Início" e abra o app pelo ícone.',bloqueado:'As notificações estão bloqueadas para este app. Libere nas configurações do celular.'}[e];
+  const txt={off:S.role==='resp'?'Ative para ser avisado quando um aluno pedir o link do cartão ou informar um pagamento.':'Ative para receber no celular os avisos da academia e os lembretes de mensalidade.',instalar:'No iPhone, as notificações funcionam com o app instalado: toque em Compartilhar → "Adicionar à Tela de Início" e abra o app pelo ícone.',bloqueado:'As notificações estão bloqueadas para este app. Libere nas configurações do celular.'}[e];
   return `<div class="card mt12"><div class="row">${ic('bell')}<b>Avisos no celular</b></div><p class="mut mt8" style="font-size:13px">${txt}</p>${e==='off'?`<button class="btn sm mt8" onclick="ativarNotif()">${ic('bell')}Ativar notificações</button>`:''}</div>`}
 
 /* ---------- ALUNO ---------- */
@@ -392,9 +392,9 @@ function aInicio(){const D=S.D,a=S.aluno,mi=D.mi;const rc=ordComp(rankRows(D.ran
   return `<div class="hello"><small>Bem-vindo de volta</small><h1 class="h1">Olá, ${esc(first(a.nome))}</h1></div>
   ${!contratoOk(a,D.cfg)?`<button class="warnbox" onclick="go({tab:'perfil',sub:'contrato'})">${ic('alert')}<span><b>Contrato aguardando seu aceite.</b><br>Toque para ler e aceitar.</span></button>`:''}
   ${checkinCard()}
+  ${notifEstado()==='off'&&LS.get('notif_banner2')!=='x'?`<div class="warnbox" style="border-color:rgba(255,255,255,.15);background:var(--card)">${ic('bell')}<span style="flex:1"><b>Receba os avisos no celular</b><br>Avisos da academia e lembretes de mensalidade.<br><button class="btn sm mt8" onclick="ativarNotif()">Ativar</button> <button class="link" onclick="LS.set('notif_banner2','x');render(true)">Agora não</button></span></div>`:''}
   ${mrow&&st!=='pago'&&!mrow.informado_em?`<button class="warnbox" onclick="go({tab:'mensal'})">${ic('money')}<span><b>Mensalidade de ${nomeMes(mi).toLowerCase()} ${st==='atrasado'?'atrasada':'em aberto'}.</b><br>Toque para pagar por Pix ou cartão.</span></button>`:''}
   ${mrow&&mrow.link_pagamento&&st!=='pago'&&!mrow.informado_em?`<button class="warnbox" style="border-color:rgba(46,204,113,.4);background:rgba(46,204,113,.08)" onclick="go({tab:'mensal'})">${ic('card')}<span><b>Seu link de pagamento chegou.</b><br>Toque para pagar no cartão.</span></button>`:''}
-  ${notifEstado()==='off'&&LS.get('notif_banner')!=='x'?`<div class="warnbox" style="border-color:rgba(255,255,255,.15);background:var(--card)">${ic('bell')}<span style="flex:1"><b>Receba avisos da mensalidade</b><br>Um lembrete quando estiver vencendo ou atrasada.<br><button class="btn sm mt8" onclick="ativarNotif()">Ativar</button> <button class="link" onclick="LS.set('notif_banner','x');render(true)">Agora não</button></span></div>`:''}
   ${feedCard(D.feed)}
   <div class="sec-t">Avisos ${D.avisos.length?`<span class="cnt">${D.avisos.length}</span>`:''}</div>
   <div>${D.avisos.length?D.avisos.slice(0,5).map(v=>`<div class="aviso">${ic('bell')}<div><p>${esc(v.texto)}</p><small>${esc(v.autor_nome||'')} • ${quando(v.criado_em)}</small></div></div>`).join(''):'<div class="empty">Nenhum aviso no momento.</div>'}</div>
@@ -485,7 +485,7 @@ function aPerfil(){if(S.sub)return backBar('Perfil')+({grad:aGrad,comp:aComp,con
    ${ctx.length>1||S.ctx.alunos.filter(x=>x.modalidade===S.mod&&x.status==='ativo').length>1?`<button class="li" onclick="trocaSheet()">${ic('swap')}<div class="grow">Trocar perfil<small>Outra modalidade ou outro aluno</small></div>${ic('chev')}</button>`:''}
    <button class="li" onclick="go({scr:'escolha'})">${ic('plus')}<div class="grow">Matrícula em outra modalidade</div>${ic('chev')}</button>
    <button class="li" onclick="sair()">${ic('logout')}<div class="grow">Sair<small>${esc(S.sess.user.email)}</small></div></button>
-  </div>${notifCard()}${notifEstado()==='on'?`<div class="li mt12">${ic('bell')}<div class="grow">Notificações ativadas<small>Você recebe os avisos de mensalidade</small></div><span class="badge b-ok">Ativas</span></div>`:''}${instalarCard()}`}
+  </div>${notifCard()}${notifEstado()==='on'?`<div class="li mt12">${ic('bell')}<div class="grow">Notificações ativadas<small>Você recebe os avisos da academia e de mensalidade</small></div><span class="badge b-ok">Ativas</span></div>`:''}${instalarCard()}`}
 function aGrad(){const a=S.aluno,g=S.D.grads||[];return `<div class="card prof-h"><small class="mut">Faixa atual</small>${belt(S.mod,a.faixa,a.grau,260)}<h2>${faixaNome(S.mod,a.faixa,a.grau)}</h2></div>
   <div class="sec-t">Histórico</div>${g.length?`<div class="card"><div class="tl">${[...g].reverse().map(h=>`<div><b>${faixaNome(S.mod,h.faixa,h.grau)}</b><br><small>${br(h.data)}</small></div>`).join('')}</div>`:'<div class="empty">Sem histórico ainda.</div>'}
   <div class="info">${ic('info')}<span>A graduação é atualizada somente pelo professor responsável.</span></div>`}
@@ -565,6 +565,7 @@ function pPublicar(){const D=S.D;const img=S.newImg;
   <div class="sec-t">Avisos</div>
   <textarea class="in" id="avtxt" placeholder="Ex.: Não haverá treino no feriado."></textarea>
   <button class="btn mt8" onclick="publicarAviso()">${ic('bell')}Publicar aviso</button>
+  <p class="mut tiny mt8">O aviso também chega no celular dos alunos que ativaram as notificações.</p>
   <div class="mt12">${D.avisos.map(v=>`<div class="aviso">${ic('bell')}<div><p>${esc(v.texto)}</p><small>${esc(v.autor_nome||'')} • ${quando(v.criado_em)}</small></div><button class="x" onclick="apagarAviso(${v.id})" aria-label="Apagar">${ic('x')}</button></div>`).join('')}</div>`}
 // Duas versões: leve para o feed (todo mundo vê) e alta qualidade só para quem toca em "Baixar"
 const FOTO_FEED={max:1080,q:.8},FOTO_HD={max:2048,q:.9};
@@ -579,7 +580,8 @@ function publicarFoto(){if(!S.newBlob){toast('Escolha uma foto primeiro',true);r
     await q(sb.from('feed').insert({modalidade:S.mod,foto_path:path,legenda:leg,autor_nome:autor()}));await apagarFotosAntigas(path);S.newImg=null;S.newBlob=null;S.newHd=null;S.legDraft='';await loadData();render(true);toast('Foto publicada no feed')})}
 async function apagarFotosAntigas(manter){try{const r=await sb.from('feed').select('id,foto_path').eq('modalidade',S.mod).neq('foto_path',manter);const old=r.data||[];if(!old.length)return;
   await sb.storage.from('feed').remove(old.flatMap(o=>[o.foto_path,hdPath(o.foto_path)]));await sb.from('feed').delete().in('id',old.map(o=>o.id))}catch(e){console.error('limpeza de fotos',e)}}
-function publicarAviso(){const t=$('#avtxt').value.trim();if(!t){toast('Escreva o aviso',true);return}act(async()=>{await q(sb.from('avisos').insert({modalidade:S.mod,texto:t,autor_nome:autor()}));await loadData();render(true);toast('Aviso publicado')})}
+function publicarAviso(){const t=$('#avtxt').value.trim();if(!t){toast('Escreva o aviso',true);return}act(async()=>{const r=await q(sb.from('avisos').insert({modalidade:S.mod,texto:t,autor_nome:autor()}).select('id').single());await loadData();render(true);toast('Aviso publicado. Enviando para o celular dos alunos…');
+  if(r&&r.id)sb.functions.invoke('notificar',{body:{acao:'novo_aviso',aviso_id:r.id}}).then(({data})=>{if(data&&data.ok)toast(data.enviados?`Aviso enviado para ${data.enviados} celular${data.enviados>1?'es':''}`:'Aviso publicado. Nenhum aluno ativou as notificações ainda.')}).catch(()=>{})})}
 function apagarAviso(id){act(async()=>{await q(sb.from('avisos').delete().eq('id',id));await loadData();render(true);toast('Aviso removido')})}
 function pComps(){const D=S.D;const pend=(D.comps||[]).filter(c=>c.status==='pendente'),ok=(D.comps||[]).filter(c=>c.status==='confirmado'&&c.data>=D.mi);
   return `<div class="hello"><small>Resultados</small><h1 class="h1">Competições</h1></div>
